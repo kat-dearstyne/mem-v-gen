@@ -1,5 +1,5 @@
 import os
-from typing import Optional, List, Tuple, Set
+from typing import Optional, List, Tuple, Set, Any
 
 import pandas as pd
 import requests
@@ -299,7 +299,7 @@ def create_subgraph_from_selected_features(feature_df: pd.DataFrame, graph_metad
             selected_features[feature_key].append(node["node_id"])
     output_nodes = []
     if include_output_node:
-        output_nodes.append(graph_nodes[-1]["node_id"])
+        output_nodes.append(get_output_logit_node(graph_metadata["nodes"])["node_id"])
 
     res = requests.post(
         "https://www.neuronpedia.org/api/graph/subgraph/save",
@@ -321,6 +321,13 @@ def create_subgraph_from_selected_features(feature_df: pd.DataFrame, graph_metad
     )
     res_json = res.json()
     return res_json['subgraphId']
+
+
+def get_output_logit_node(nodes: List[dict]) -> Any:
+    """
+    Gets the the node that represents the target output logit from a list of all graph nodes.
+    """
+    return [node for node in nodes if node['is_target_logit']][0]
 
 
 def get_subgraphs(graph_metadata) -> dict:

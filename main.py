@@ -1,8 +1,10 @@
 import os
+import json
 
 from dotenv import load_dotenv
 
 from common_utils import user_select_prompt, user_select_models
+from constants import AVAILABLE_MODELS
 from subgraph_comparisons import compare_prompt_subgraphs, compare_token_subgraphs
 
 load_dotenv()
@@ -11,30 +13,33 @@ class Task:
     PROMPT_SUBGRAPH_COMPARE = "prompt"
     TOKEN_SUBGRAPH_COMPARE = "token"
 
-SELECTED_TASK = Task.TOKEN_SUBGRAPH_COMPARE
+# Load config from environment variable
+config_name = os.getenv("CONFIG_NAME")
+config_path = os.path.join("configs", f"{config_name}.json")
+with open(config_path, "r") as f:
+    config = json.load(f)
 
-# MEMORIZED PROMPT OF INTEREST
-MAIN_PROMPT = "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF"
+# Load prompts from config
+MAIN_PROMPT = config["MAIN_PROMPT"]
+DIFF_PROMPTS = config.get("DIFF_PROMPTS", [])
+SIM_PROMPTS = config.get("SIM_PROMPTS", [])
+TOKEN_OF_INTEREST = config.get("TOKEN_OF_INTEREST")
+SELECTED_TASK = config.get("TASK")
+
+if DIFF_PROMPTS or SIM_PROMPTS:
+    assert not TOKEN_OF_INTEREST or SELECTED_TASK, ("Both TOKEN_OF_INTEREST and DIFF_PROMPTS/SIM_PROMPTS supplied. "
+                                                    "Must specify what task to perform.")
+    SELECTED_TASK = SELECTED_TASK if SELECTED_TASK else Task.PROMPT_SUBGRAPH_COMPARE
+
+elif TOKEN_OF_INTEREST:
+    SELECTED_TASK = SELECTED_TASK if SELECTED_TASK else Task.TOKEN_SUBGRAPH_COMPARE
+
 MODEL = "gemma-2-2b"
-SUBMODEL = "clt-hp"
+SUBMODEL = AVAILABLE_MODELS[MODEL][0]
 
 SAVE_PATH = "~/data/spar-memory/neuronpedia/"
 
-# ================= Compare different prompt subgraphs ===============
-# Prompts where feature is expected to NOT be in any
-DIFF_PROMPTS = [
-    "THE SOFTWARE AND ANY ACCOMPANYING MATERIALS ARE PROVIDED \"AS IS\", "
-    "WITHOUT ANY PROMISE OR GUARANTEE OF PERFORMANCE, RELIABILITY, OR SUITABILITY AND THE WARRANTIES OF",
-    "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT"
-]
-# Prompts where feature is expected to be present in all
-SIM_PROMPTS = [
-    "The software is provided \"as is\", without warranty of any kind, express or implied, "
-    "including but not limited to the warranties of"
-]
-
 # ================= Compre different token subgraphs ==================
-TOKEN_OF_INTEREST = "\""
 TOP_K = 4
 
 if __name__ == "__main__":

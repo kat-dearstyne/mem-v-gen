@@ -5,7 +5,7 @@ import pandas as pd
 from pandas import DataFrame
 
 from attribution_graph_utils import create_node_df, create_or_load_graph, create_subgraph_from_selected_features, \
-    get_subgraphs, get_linked_sources
+    get_subgraphs, get_linked_sources, get_output_logit_node
 from common_utils import get_feature_from_node_id, create_node_id, Feature, get_output_token_from_clerp
 
 
@@ -92,7 +92,7 @@ def compare_prompt_subgraphs(main_prompt: str, diff_prompts: List[str], sim_prom
 
     # Combine all features if both diff and sim prompts are provided. Otherwise, select relevant df.
     if diff_prompts and sim_prompts:
-        features_of_interest = pd.merge(overlapping_features, unique_features, how='inner', on=['layer', 'feature'])
+        features_of_interest = pd.merge(overlapping_features[['layer', 'feature']], unique_features[['layer', 'feature']], how='inner', on=['layer', 'feature'])
     else:
         features_of_interest = unique_features if unique_features is not None else overlapping_features
 
@@ -100,7 +100,7 @@ def compare_prompt_subgraphs(main_prompt: str, diff_prompts: List[str], sim_prom
         "Must provided either prompts to compare with or to contrast with."
     print(f"Neuronpedia Graph for Main Prompt: {graph_metadata['metadata']['info']['url']}")
 
-    output_node = graph_metadata["nodes"][-1]
+    output_node = get_output_logit_node(graph_metadata["nodes"])
     features_of_interest = features_of_interest[~features_of_interest['layer'].isin(['0', 'E', output_node['layer']])]
 
     timestamp_str = datetime.now().strftime("%m-%d-%y %H:%M:%S")
@@ -143,7 +143,7 @@ def compare_token_subgraphs(main_prompt: str, token_of_interest: str, model: str
                  int(feature.layer) > 1]  # list of all unique features at layers higher than 1
     node_df = pd.DataFrame(node_dict)
 
-    create_subgraph_from_selected_features(node_df, graph_metadata, f"unique features for {token_of_interest}",
+    create_subgraph_from_selected_features(node_df, graph_metadata, f"Unique Features for {token_of_interest}",
                                                  include_output_node=False)
 
 

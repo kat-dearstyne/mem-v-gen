@@ -8,11 +8,30 @@
 pip install -r requirement.txt
 ```
 
-2. Create a `.env` file in the project root with your Neuronpedia API key:
+2. Create a `.env` file in the project root with your Neuronpedia API key and config name:
 
 ```bash
 NEURONPEDIA_API_KEY=your_api_key_here
+CONFIG_NAME=merchantability
 ```
+
+The `CONFIG_NAME` variable specifies which JSON config file to load from the `configs/` directory (e.g., `CONFIG_NAME=merchantability` loads `configs/merchantability.json`).
+
+## Configuration Files
+
+Prompt configurations are stored as JSON files in the `configs/` directory. Each config file can contain:
+- `MAIN_PROMPT`: The main memorized prompt to analyze (required)
+- `DIFF_PROMPTS`: Array of contrasting prompts (for PROMPT_SUBGRAPH_COMPARE)
+- `SIM_PROMPTS`: Array of similar prompts (for PROMPT_SUBGRAPH_COMPARE)
+- `TOKEN_OF_INTEREST`: Specific token to analyze (for TOKEN_SUBGRAPH_COMPARE)
+- `TASK`: Task type to run - either "prompt" or "token" (optional, auto-detected based on which fields are present)
+
+The task is automatically determined based on the configuration:
+- If `DIFF_PROMPTS` or `SIM_PROMPTS` are present, it runs PROMPT_SUBGRAPH_COMPARE
+- If `TOKEN_OF_INTEREST` is present, it runs TOKEN_SUBGRAPH_COMPARE
+- You can explicitly set the `TASK` field to override this behavior
+
+See the Task Selection section below for details on how these parameters are used.
 
 ## Usage
 
@@ -24,31 +43,18 @@ python main.py
 
 ## Task Selection
 
-The tool supports two different analysis tasks. Configure the task by setting the `SELECTED_TASK` variable in `main.py`:
+The tool supports two different analysis tasks, configured via the config file:
 
 ### 1. PROMPT_SUBGRAPH_COMPARE
 
 Finds unique and/or overlapping features from the subgraphs of multiple different prompts.
 
-**Configuration in main.py:**
-```python
-SELECTED_TASK = Task.PROMPT_SUBGRAPH_COMPARE
+**Configuration:**
 
-# Main prompt to analyze
-MAIN_PROMPT = "YOUR MEMORIZED PROMPT HERE"
-
-# Prompts where features are expected to NOT be present
-DIFF_PROMPTS = [
-    "different prompt 1",
-    "different prompt 2"
-]
-
-# Prompts where features are expected to be present
-SIM_PROMPTS = [
-    "similar prompt 1",
-    "similar prompt 2"
-]
-```
+Set the following in your config file:
+- `MAIN_PROMPT`: The main memorized prompt to analyze
+- `DIFF_PROMPTS`: Array of prompts where features are expected NOT to be present
+- `SIM_PROMPTS`: Array of prompts where features are expected to be present
 
 This task compares the subgraph of the main prompt against:
 - **DIFF_PROMPTS**: Finds features unique to the main prompt (not present in these)
@@ -58,19 +64,13 @@ This task compares the subgraph of the main prompt against:
 
 Finds unique features from a token of interest's subgraph compared to subgraphs of other top output tokens.
 
-**Configuration in main.py:**
-```python
-SELECTED_TASK = Task.TOKEN_SUBGRAPH_COMPARE
+**Configuration:**
 
-# Main prompt to analyze
-MAIN_PROMPT = "YOUR MEMORIZED PROMPT HERE"
+Set the following in your config file:
+- `MAIN_PROMPT`: The main memorized prompt to analyze
+- `TOKEN_OF_INTEREST`: The specific token to focus analysis on
 
-# Token to focus analysis on
-TOKEN_OF_INTEREST = "TOKEN OF INTEREST"
-
-# Number of top output tokens to compare against
-TOP_K = N
-```
+The `TOP_K` parameter (number of top output tokens to compare against) can be configured in `main.py`.
 
 This task analyzes the subgraph of a specific token of interest and compares it against the subgraphs of the top K alternative output tokens to identify distinguishing features.
 
