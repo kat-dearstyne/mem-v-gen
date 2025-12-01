@@ -1,0 +1,8 @@
+{
+  "MAIN_PROMPT": "The mountain village buzzed with music during the annual festival as lanterns drifted slowly into the twilight sky.",
+  "DIFF_PROMPTS": [
+    "A deep-space research vessel mapped distant nebulae while its crew monitored glowing particles swirling beyond the observation window."
+  ],
+  "SIM_PROMPTS": [
+  ]
+}

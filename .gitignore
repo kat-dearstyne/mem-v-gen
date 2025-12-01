@@ -131,3 +131,6 @@ dmypy.json
 
 # Data directory
 data/
+
+
+output/

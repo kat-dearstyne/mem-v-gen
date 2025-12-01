@@ -1,0 +1,8 @@
+{
+  "MAIN_PROMPT": "The old lighthouse creaked softly as waves crashed below and gulls circled lazily in the afternoon sun.",
+  "DIFF_PROMPTS": [
+    "A curious robot explored abandoned corridors while collecting data samples to understand forgotten technologies buried beneath dust."
+  ],
+  "SIM_PROMPTS": [
+  ]
+}

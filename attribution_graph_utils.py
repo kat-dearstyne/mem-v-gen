@@ -1,5 +1,5 @@
 import os
-from typing import Optional, List, Tuple, Set, Any
+from typing import Optional, List, Tuple, Set, Any, Dict
 
 import pandas as pd
 import requests
@@ -61,7 +61,9 @@ def create_or_load_graph(graph_dir: str, model: str, submodel: str, prompt: str)
     return graph_metadata
 
 
-def create_node_df(graph_metadata: dict) -> pd.DataFrame:
+def create_node_df(graph_metadata: dict, include_errors_by_pos: bool = False,
+                   exclude_embeddings: bool = False, exclude_errors: bool = False,
+                   exclude_logits: bool = False) -> pd.DataFrame:
     """
     Extract node information from graph metadata into a DataFrame.
     """
@@ -71,17 +73,25 @@ def create_node_df(graph_metadata: dict) -> pd.DataFrame:
     ctx_idx_list = []
 
     for node in graph_metadata["nodes"]:
-        feature = get_feature_from_node_id(node["node_id"], deliminator="_")[1]
-        feature_list.append(feature)
-
-        layer = node["layer"]
-        layer_list.append(layer)
-
         feature_type = node["feature_type"]
+        if exclude_embeddings and feature_type == 'embedding':
+            continue
+        if exclude_errors and 'error' in feature_type:
+            continue
+        if exclude_logits and feature_type == 'logit':
+            continue
         feature_type_list.append(feature_type)
 
         ctx_idx = node["ctx_idx"]
         ctx_idx_list.append(ctx_idx)
+
+        feature = get_feature_from_node_id(node["node_id"], deliminator="_")[1]
+        if 'error' in feature_type and include_errors_by_pos:
+            feature = f"{feature}{ctx_idx}"
+        feature_list.append(feature)
+
+        layer = node["layer"]
+        layer_list.append(layer)
 
     node_df = pd.DataFrame({
         "feature": feature_list,
@@ -264,7 +274,7 @@ def create_feature_list(prompt_id: str, model: str, submodel: str) -> str | None
 
 
 def get_overlap_scores_for_features(prompt_tokens: list[str], features: list[dict], tok_k_activations: int = 10) -> \
-list[int]:
+        list[int]:
     """
     Calculates the max overlap of activating tokens with the prompt for each feature.
     """
@@ -294,12 +304,12 @@ def create_subgraph_from_selected_features(feature_df: pd.DataFrame, graph_metad
     graph_nodes = graph_metadata["nodes"]
     for node in graph_nodes:
         feature_id = get_feature_from_node_id(node["node_id"], deliminator="_")[1]
-        feature_key =  f"{node['layer']}-{feature_id}"
+        feature_key = f"{node['layer']}-{feature_id}"
         if feature_key in selected_features:
             selected_features[feature_key].append(node["node_id"])
     output_nodes = []
     if include_output_node:
-        output_nodes.append(get_output_logit_node(graph_metadata["nodes"])["node_id"])
+        output_nodes.append(get_top_output_logit_node(graph_metadata["nodes"])["node_id"])
 
     res = requests.post(
         "https://www.neuronpedia.org/api/graph/subgraph/save",
@@ -312,7 +322,7 @@ def create_subgraph_from_selected_features(feature_df: pd.DataFrame, graph_metad
             "slug": graph_metadata["metadata"]["slug"],
             "displayName": list_name,
             "pinnedIds": [node for nodes in selected_features.values() for node in nodes] + output_nodes,
-            "supernodes": [[name] + nodes for name, nodes in selected_features.items()],
+            "supernodes": [],  # [[name] + nodes for name, nodes in selected_features.items()],
             "clerps": [],
             "pruningThreshold": 0.8,
             "densityThreshold": 0.99,
@@ -323,11 +333,56 @@ def create_subgraph_from_selected_features(feature_df: pd.DataFrame, graph_metad
     return res_json['subgraphId']
 
 
-def get_output_logit_node(nodes: List[dict]) -> Any:
+def create_subgraph_from_links(links: pd.DataFrame, graph_metadata: dict,
+                               list_name: str = "top features") -> str:
+    """
+    Creates a subgraph of the selected features on Neuronpedia.
+    """
+    node_ids = {link['target'] for link in links}
+    node_ids.update({link['source'] for link in links})
+    res = requests.post(
+        "https://www.neuronpedia.org/api/graph/subgraph/save",
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": get_api_key()
+        },
+        json={
+            "modelId": graph_metadata["metadata"]["scan"],
+            "slug": graph_metadata["metadata"]["slug"],
+            "displayName": list_name,
+            "pinnedIds": list(node_ids),
+            "supernodes": [],
+            "clerps": [],
+            "pruningThreshold": 0.8,
+            "densityThreshold": 0.99,
+            "overwriteId": ""
+        }
+    )
+    res_json = res.json()
+    return res_json['subgraphId']
+
+
+def get_top_output_logit_node(nodes: List[dict]) -> Any:
     """
     Gets the the node that represents the target output logit from a list of all graph nodes.
     """
     return [node for node in nodes if node['is_target_logit']][0]
+
+
+def get_output_logits(nodes: List[dict]) -> Any:
+    """
+    Gets the the node that represents the target output logit from a list of all graph nodes.
+    """
+    return [node for node in nodes if node['feature_type'] == "logit"]
+
+
+def merge_node_dfs(node_df1: DataFrame, node_df2: DataFrame) -> DataFrame:
+    """
+    Merges two dfs containing columns layer and feature.
+    """
+    merged_df = pd.merge(node_df1[['layer', 'feature']], node_df2[['layer', 'feature']], on=['layer', 'feature'],
+                         how='left', indicator=True)
+    return merged_df
 
 
 def get_subgraphs(graph_metadata) -> dict:
@@ -348,6 +403,7 @@ def get_subgraphs(graph_metadata) -> dict:
     res_json = res.json()
     return res_json
 
+
 def get_linked_sources(graph_metadata: dict, output_token_to_features: dict, positive_only: bool = True):
     """
     Gets all sources linked to each output token.
@@ -360,3 +416,45 @@ def get_linked_sources(graph_metadata: dict, output_token_to_features: dict, pos
                     nodes.add(link["source"])
                     newly_added = True
     return newly_added
+
+
+def get_links_from_node(graph_metadata: dict, starting_node: dict = None,
+                        positive_only: bool = True, hops: int = None, include_features_only: bool = False):
+    """
+    Gets all links from a starting node.
+    """
+    allowed_nodes = {node["node_id"] for node in graph_metadata["nodes"]
+                     if not include_features_only or node["feature_type"] == 'cross layer transcoder'}
+    if starting_node is None:
+        starting_node = get_top_output_logit_node(graph_metadata['nodes'])
+    starting_node_id = starting_node["node_id"]
+    target_id_to_links = {}
+    for link in graph_metadata["links"]:
+        target_id = link["target"]
+        if target_id not in target_id_to_links:
+            target_id_to_links[target_id] = []
+        if not positive_only or link["weight"] > 0:
+            target_id_to_links[target_id].append(link)
+    relevant_links = []
+    seen = set()
+    new_targets = get_links_to_targets([starting_node_id], target_id_to_links, relevant_links, allowed_nodes)
+    n_hops = 0
+    while new_targets:
+        seen.update(new_targets)
+        new_targets = get_links_to_targets(new_targets, target_id_to_links, relevant_links, allowed_nodes)
+        new_targets = new_targets.difference(seen)
+        n_hops += 1
+        if hops and n_hops >= hops:
+            break
+    return relevant_links
+
+
+def get_links_to_targets(target_ids: List | Set, target_id_to_links: Dict, links: list, allowed_nodes: set):
+    """
+    Get links to specified target ids.
+    """
+    for target_id in target_ids:
+        linked = target_id_to_links.get(target_id, [])
+        links.extend([link for link in linked if link["source"] in allowed_nodes])
+    new_targets = {link["source"] for link in links}
+    return new_targets

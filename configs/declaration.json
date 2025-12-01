@@ -1,0 +1,9 @@
+{
+  "MAIN_PROMPT": "When in the Course of human events, it becomes necessary for one people to dissolve the political bands which have connected them with another, and to assume among the powers of the",
+  "DIFF_PROMPTS": [
+    "When circumstances lead one population to need to separate itself politically from another, and step forward to take their place among the other nations of the",
+    "Whenever the bonds of governance grow deaf to the call of justice, a people may rightfully convene to reaffirm their sacred charge to liberty, that harmony may again be restore upon the"
+  ],
+  "SIM_PROMPTS": [
+  ]
+}

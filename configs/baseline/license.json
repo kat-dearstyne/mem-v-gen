@@ -1,0 +1,9 @@
+{
+  "MAIN_PROMPT":     "This software is distributed under a developmental license that outlines experimental access rights, provisional obligations, and limited warranties granting you limited, revocable permission to",
+  "DIFF_PROMPTS": [
+      "Authorization is given, at no cost, to anyone who gets a copy of this software and its accompanying documentation, to deal in the Software in any way they choose, including and not limited to, the right to"
+
+  ],
+  "SIM_PROMPTS": [
+  ]
+}

@@ -5,7 +5,7 @@ import os
 import re
 import uuid
 from collections import namedtuple
-from typing import Tuple, NamedTuple
+from typing import Tuple, NamedTuple, Any
 
 import pandas as pd
 from pick import pick
@@ -83,7 +83,7 @@ def user_select_prompt(prompt_default: str = None, graph_dir: str | None = None)
     """
     latest_graph_file = get_most_recent_file(graph_dir) if graph_dir else None
     last_prompt = None
-    if latest_graph_file:
+    if latest_graph_file and not prompt_default:
         graph_metadata = load_json(latest_graph_file)
         last_prompt = graph_metadata["metadata"]["prompt"].replace("<bos>", "")
         print(f"MOST RECENT PROMPT: {last_prompt}")
@@ -162,3 +162,11 @@ def get_output_token_from_clerp(output_node: dict) -> str:
             token = '\"'
         return token
     return ''
+
+def get_id_without_pos(node_name: str) -> Any:
+    """
+    Removes the position part of the id
+    """
+    if node_name.count("_") == 3:
+        return node_name.rsplit("_", 1)[0]
+    return node_name
