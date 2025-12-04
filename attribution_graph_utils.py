@@ -385,9 +385,10 @@ def merge_node_dfs(node_df1: DataFrame, node_df2: DataFrame) -> DataFrame:
     return merged_df
 
 
-def get_subgraphs(graph_metadata) -> dict:
+def get_subgraphs(graph_metadata: dict) -> dict:
     """
-    Creates a subgraph of the selected features on Neuronpedia.
+    Retrieves a list of all subgraphs associated with the given graph from Neuronpedia.
+    Returns a dictionary containing subgraph information.
     """
     res = requests.post(
         "https://www.neuronpedia.org/api/graph/subgraph/list",
@@ -404,9 +405,10 @@ def get_subgraphs(graph_metadata) -> dict:
     return res_json
 
 
-def get_linked_sources(graph_metadata: dict, output_token_to_features: dict, positive_only: bool = True):
+def get_linked_sources(graph_metadata: dict, output_token_to_features: dict, positive_only: bool = True) -> bool:
     """
-    Gets all sources linked to each output token.
+    Gets all sources linked to each output token and updates the output_token_to_features dictionary in place.
+    Returns True if any new sources were added, False otherwise.
     """
     newly_added = False
     for link in graph_metadata["links"]:
@@ -421,7 +423,8 @@ def get_linked_sources(graph_metadata: dict, output_token_to_features: dict, pos
 def get_links_from_node(graph_metadata: dict, starting_node: dict = None,
                         positive_only: bool = True, hops: int = None, include_features_only: bool = False):
     """
-    Gets all links from a starting node.
+    Finds all links that are connected to a starting node with the option to include only positive edges,
+    include edges for only n hops away from start, or include only edges connecting to 'cross layer transcoder' features.
     """
     allowed_nodes = {node["node_id"] for node in graph_metadata["nodes"]
                      if not include_features_only or node["feature_type"] == 'cross layer transcoder'}
@@ -440,13 +443,32 @@ def get_links_from_node(graph_metadata: dict, starting_node: dict = None,
     new_targets = get_links_to_targets([starting_node_id], target_id_to_links, relevant_links, allowed_nodes)
     n_hops = 0
     while new_targets:
-        seen.update(new_targets)
-        new_targets = get_links_to_targets(new_targets, target_id_to_links, relevant_links, allowed_nodes)
-        new_targets = new_targets.difference(seen)
         n_hops += 1
         if hops and n_hops >= hops:
             break
+        seen.update(new_targets)
+        new_targets = get_links_to_targets(new_targets, target_id_to_links, relevant_links, allowed_nodes)
+        new_targets = new_targets.difference(seen)
+
     return relevant_links
+
+def get_nodes_linked_to_target(graph_metadata: dict, target_node: dict, should_sort: bool = True) -> List[dict]:
+    """
+    Gets all nodes that are directly linked to the target_node, with options to sort them by weight.
+    Returns a list of node dictionaries sorted by link weight (descending) if should_sort is True.
+    """
+    all_nodes = get_node_dict(graph_metadata)
+    links = get_links_from_node(graph_metadata, target_node, hops=1)
+    if should_sort:
+        links = sorted(links, key=lambda link: link['weight'], reverse=True)
+    return [all_nodes[link['source']] for link in links]
+
+def get_node_dict(graph_metadata: dict) -> dict[Any, Any]:
+    """
+    Gets a dictionary mapping node_id to node for each node of the graph.
+    """
+    node_dict = {node["node_id"]: node for node in graph_metadata['nodes']}
+    return node_dict
 
 
 def get_links_to_targets(target_ids: List | Set, target_id_to_links: Dict, links: list, allowed_nodes: set):

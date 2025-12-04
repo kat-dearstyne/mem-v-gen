@@ -167,6 +167,6 @@ def get_id_without_pos(node_name: str) -> Any:
     """
     Removes the position part of the id
     """
-    if node_name.count("_") == 3:
+    if node_name.count("_") == 2:
         return node_name.rsplit("_", 1)[0]
     return node_name
