@@ -1,0 +1,9 @@
+{
+  "MAIN_PROMPT": "Jack and Jill went up the hill to fetch a pail of",
+  "DIFF_PROMPTS": [
+    "Jackie and Jillian climbed the slope to retrieve a bucket of",
+    "Two children hurried up the rise, hoping to fill their small wooden bucket with"
+  ],
+  "SIM_PROMPTS": [
+  ]
+}

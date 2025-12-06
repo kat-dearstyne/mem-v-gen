@@ -1,8 +1,10 @@
 import random
+from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from scipy.stats import mannwhitneyu, wilcoxon, ttest_rel
 
 from attribution_graph_utils import create_or_load_graph, get_top_output_logit_node, get_output_logits, \
@@ -391,9 +393,41 @@ def boxplot_metric_family(metric_dict: Dict[int, List[float]], title_prefix: str
     plt.ylabel("Δ (metric1 - metric2)")
     plt.show()
 
+def stats_to_csv(stats: dict[str, Any], filepath: Path) -> pd.DataFrame:
+    """
+    Saves stats from error analysis to csv.
+    """
+    rows = []
+
+    # Top-K
+    for k, s in stats["top_k"].items():
+        rows.append({
+            "metric": f"top_k_{k}",
+            **s
+        })
+
+    # NDCG
+    for k, s in stats["ndcg"].items():
+        rows.append({
+            "metric": f"ndcg_{k}",
+            **s
+        })
+
+    # AP
+    rows.append({
+        "metric": "average_precision",
+        **stats["ap"]
+    })
+
+    df = pd.DataFrame(rows)
+    df.to_csv(filename, index=False)
+    return df
+
+
 
 def analyze_condition(pair_results: List[Dict[str, Any]],
-                     ks: Optional[List[int]] = None, show_plots: bool = False) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+                     ks: Optional[List[int]] = None, show_plots: bool = False,
+                      save_path: Path = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Performs comprehensive statistical analysis and visualization of error ranking metrics.
     Extracts delta values, computes statistical tests, and generates visualizations.
@@ -416,5 +450,9 @@ def analyze_condition(pair_results: List[Dict[str, Any]],
 
         # AP distribution
         plot_delta_distribution(deltas["ap"], "Average Precision Δ Distribution")
+
+    if save_path:
+        stats_to_csv(stats, filepath=save_path)
+        print(f"Saved error results to: {save_path}")
 
     return stats, deltas

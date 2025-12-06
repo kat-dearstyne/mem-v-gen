@@ -7,7 +7,7 @@ import pandas as pd
 from pandas import DataFrame
 from attribution_graph_utils import create_node_df, create_or_load_graph, create_subgraph_from_selected_features, \
     get_subgraphs, get_linked_sources, get_top_output_logit_node, get_links_from_node, \
-    get_output_logits, get_node_dict
+    get_output_logits, get_node_dict, get_feature, get_all_features
 from common_utils import get_feature_from_node_id, create_node_id, Feature, get_output_token_from_clerp, \
     get_id_without_pos
 
@@ -182,7 +182,8 @@ def select_features_by_links(graph_metadata: dict, target_ids: str | Set[str],
 
 
 def compare_prompt_subgraphs(main_prompt: str, diff_prompts: List[str], sim_prompts: List[str],
-                             model: str, submodel: str, graph_dir: str, debug: bool = False) -> Optional[dict]:
+                             model: str, submodel: str, graph_dir: str, filter_by_act_density: int = None,
+                             debug: bool = False) -> Optional[dict]:
     overlapping_features: Optional[pd.DataFrame] = None
     unique_features: Optional[pd.DataFrame] = None
     graph_metadata: Optional[Dict[str, Any]] = None
@@ -212,14 +213,14 @@ def compare_prompt_subgraphs(main_prompt: str, diff_prompts: List[str], sim_prom
     print(f"Neuronpedia Graph for Main Prompt: {graph_metadata['metadata']['info']['url']}")
 
     output_node = get_top_output_logit_node(graph_metadata["nodes"])
-    filter_layers = ['E', output_node['layer']] + [str(i) for i in range(5)]
+    filter_layers = ['E', output_node['layer']] + [str(i) for i in range(2)]
     features_of_interest = features_of_interest[~features_of_interest['layer'].isin(filter_layers)]
-    linked_to_output = {get_id_without_pos(node['source']) for node in
-                        get_links_from_node(graph_metadata, output_node, hops=1,
-                                            include_features_only=True, positive_only=True)}
-    selected_features = [feature for feature in features_of_interest.itertuples()
-                         if create_node_id(feature, deliminator="_") in linked_to_output]
-    features_of_interest = pd.DataFrame(selected_features)
+    if filter_by_act_density:
+        feature_info = get_all_features(features_of_interest, model=model, submodel=submodel)
+        selected_features = [feature_row for feature_info, feature_row in
+                             zip(feature_info, features_of_interest.itertuples())
+                             if feature_info['frac_nonzero'] * 100 < filter_by_act_density]
+        features_of_interest = pd.DataFrame(selected_features)
     timestamp_str = datetime.now().strftime("%m-%d-%y %H:%M:%S")
     create_subgraph_from_selected_features(features_of_interest, graph_metadata,
                                            list_name=f"Features of Interest ({timestamp_str})")

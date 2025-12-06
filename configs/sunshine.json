@@ -1,0 +1,9 @@
+{
+  "MAIN_PROMPT": "You are my sunshine, my only sunshine. You make me happy when skies are gray. You’ll never know, dear, how much I love you; please don’t take my sunshine",
+  "DIFF_PROMPTS": [
+    "You are my bright light, my dearest bright light. You lift my spirits when the skies turn gray. You may not realize, love, how deeply I care for you; please don’t let that bright light drift",
+    "In the gentle morning glow, your presence steadies me. You bring me joy even when the day grows dim. You might not see, love, how tightly I hold to that feeling; please don’t let that comfort slip"
+  ],
+  "SIM_PROMPTS": [
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "MAIN_PROMPT": "Then I saw “a new heaven and a new earth,” for the first heaven and the first earth had passed away, and there was no longer any",
+  "DIFF_PROMPTS": [
+    "And they will walk forward unafraid, hearing the quiet promise carried on the winds above the restless"
+  ],
+  "SIM_PROMPTS": [
+     "I looked and saw an entirely new sky and a new world, because the previous sky and world had vanished, and there was no more"
+  ]
+}

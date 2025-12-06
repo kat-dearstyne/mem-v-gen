@@ -1,0 +1,9 @@
+{
+  "MAIN_PROMPT": "When you have eliminated the impossible, whatever remains, however improbable, must be the",
+  "DIFF_PROMPTS": [
+    "Once the impossible is ruled out, whatever is left—no matter how unlikely—must represent the",
+    "After reviewing every false lead, the magistrate concluded that only one explanation remained, and though it strained belief, it had to be the"
+  ],
+  "SIM_PROMPTS": [
+  ]
+}

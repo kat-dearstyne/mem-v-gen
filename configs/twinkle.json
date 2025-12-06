@@ -1,0 +1,9 @@
+{
+  "MAIN_PROMPT": "Twinkle, twinkle, little star, how I wonder what you",
+  "DIFF_PROMPTS": [
+    "Twinkling softly, tiny star, I keep asking what you",
+    "Over the quiet treetops a faint light flickers, making me question what you"
+  ],
+  "SIM_PROMPTS": [
+  ]
+}

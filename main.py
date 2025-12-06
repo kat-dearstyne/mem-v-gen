@@ -1,6 +1,7 @@
 import os
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Any
 
 import pandas as pd
@@ -8,7 +9,7 @@ from dotenv import load_dotenv
 from numpy.distutils.lib2def import DATA_RE
 
 from common_utils import user_select_prompt, user_select_models
-from constants import AVAILABLE_MODELS
+from constants import AVAILABLE_MODELS, CONFIG_BASE_DIR
 from subgraph_comparisons import compare_prompt_subgraphs, compare_token_subgraphs, IntersectionMetrics
 from error_comparisons import run_error_ranking, run_error_analysis, analyze_condition
 
@@ -22,21 +23,19 @@ class Task:
 
 # ================= Setup Variables ==================
 CONFIG_NAMES = os.getenv("CONFIG_NAME", "").split(",")
-USE_BASELINES = os.getenv("USE_BASELINES", "False").lower() == "true"
+CONFIG_DIR = os.getenv("CONFIG_DIR", "")
 MODEL = "gemma-2-2b"
 SUBMODEL = AVAILABLE_MODELS[MODEL][0]
 DATA_PATH = "~/data/spar-memory/neuronpedia/"
 OUTPUT_PATH = "output"
 TOP_K = 4
-RUN_ERROR_ANALYSIS = False
-PROMPT_IDS = ["mem", "gen1", "gen2"]
-if USE_BASELINES:
-    PROMPT_IDS = ["main", "baseline"]
-    CONFIG_NAMES = [os.path.join("baseline", config) for config in CONFIG_NAMES]
+RUN_ERROR_ANALYSIS = True
+PROMPT_IDS_TRIPLETS = ["mem", "gen1", "gen2"]
+PROMPT_ID_PAIRS = ["main", "baseline"]
 
 
-def run_for_config(config_name: str) -> tuple[Optional[dict], Optional[dict]]:
-    config_path = os.path.join("configs", f"{config_name}.json")
+def run_for_config(config_dir: Path, config_name: str) -> tuple[Optional[dict], Optional[dict]]:
+    config_path = config_dir / f"{config_name}.json"
     with open(config_path, "r") as f:
         config = json.load(f)
 
@@ -60,7 +59,8 @@ def run_for_config(config_name: str) -> tuple[Optional[dict], Optional[dict]]:
     graph_dir = os.path.join(base_save_path, "graphs")
 
     prompt = user_select_prompt(prompt_default=main_prompt, graph_dir=graph_dir)
-    prompt2ids = {p: (PROMPT_IDS[index] if len(PROMPT_IDS) > index else p)
+    prompt_ids = PROMPT_IDS_TRIPLETS if len(diff_prompts) == 3 else PROMPT_ID_PAIRS
+    prompt2ids = {p: (prompt_ids[index] if len(prompt_ids) > index else p)
                   for index, p in enumerate([prompt] + diff_prompts)}
     error_analysis_results = None
     if selected_task == Task.PROMPT_SUBGRAPH_COMPARE:
@@ -91,13 +91,18 @@ def run_for_config(config_name: str) -> tuple[Optional[dict], Optional[dict]]:
 
 
 if __name__ == "__main__":
-    assert CONFIG_NAMES, "No config names provided!"
+    assert CONFIG_NAMES or CONFIG_DIR, "Must provide config names or config dir!"
+    config_dir = Path(CONFIG_BASE_DIR)
+    if CONFIG_DIR:
+        config_dir = config_dir / CONFIG_DIR
+    if not CONFIG_NAMES or CONFIG_NAMES[0].lower().strip() == 'all':
+        CONFIG_NAMES = [f.stem for f in config_dir.glob("*.json")]
     all_results = {"config_name": [], "prompt_type": [],
                    **{metric_name: [] for metric_name in IntersectionMetrics._fields}}
     error_pair_results = []
     for config in CONFIG_NAMES:
         config = config.strip()
-        results, error_analysis_results = run_for_config(config)
+        results, error_analysis_results = run_for_config(config_dir, config)
         results: dict[str, IntersectionMetrics]
         error_pair_results.append(error_analysis_results)
         for i, (prompt, metrics) in enumerate(results.items()):
@@ -105,9 +110,12 @@ if __name__ == "__main__":
             all_results["prompt_type"].append(prompt)
             for metric_name, metric in zip(IntersectionMetrics._fields, metrics):
                 all_results[metric_name].append(metric)
-    if all(error_pair_results):
-        stats, deltas = analyze_condition(error_pair_results)
+
     results_df = pd.DataFrame(all_results)
-    results_filename = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_dir = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(OUTPUT_PATH, exist_ok=True)
-    results_df.to_csv(os.path.join(OUTPUT_PATH, f"{results_filename}.csv"))
+    results_df.to_csv(os.path.join(OUTPUT_PATH, results_dir, f"overlap-metrics.csv"))
+
+    if all(error_pair_results):
+        stats, deltas = analyze_condition(error_pair_results,
+                                          save_path=Path(OUTPUT_PATH) / results_dir / "error-results.csv")

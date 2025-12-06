@@ -1,0 +1,9 @@
+{
+  "MAIN_PROMPT": "Whenever I find myself growing grim about the mouth; whenever it is a damp, drizzly November in my",
+  "DIFF_PROMPTS": [
+    "And in that dim, amber light of the parlor, I felt a trembling certainty take root within the quiet chambers of my"
+  ],
+  "SIM_PROMPTS": [
+   "Whenever I catch myself getting sour and tight-lipped; whenever it feels like there’s a cold, gray November inside my"
+  ]
+}
