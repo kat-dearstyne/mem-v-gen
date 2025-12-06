@@ -11,6 +11,9 @@ from attribution_graph_utils import create_or_load_graph, get_top_output_logit_n
     get_nodes_linked_to_target, get_node_dict, get_links_from_node
 from common_utils import get_id_without_pos
 
+CONDITION1 = "verbatim"
+CONDITION2 = "generalized"
+
 
 def run_error_ranking(prompt1: str, prompt2: str, model: str, submodel: str,
                       graph_dir: Optional[str]) -> Dict[str, Any]:
@@ -43,12 +46,13 @@ def run_error_ranking(prompt1: str, prompt2: str, model: str, submodel: str,
 
 
 def compare_error_rankings(graph1_nodes: List[Dict[str, Any]],
-                          graph2_nodes: List[Dict[str, Any]]) -> Dict[str, Any]:
+                           graph2_nodes: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Compare how highly error nodes rank in two graphs using a Mann–Whitney U test.
     Each graph is a ranked list of node dictionaries.
     Nodes where node['feature_type'] == 'mlp reconstruction error' are treated as errors.
     """
+
     def get_error_percentile_ranks(graph_nodes: List[Dict[str, Any]]) -> List[float]:
         n = len(graph_nodes)
         error_percentiles = []
@@ -97,6 +101,7 @@ def error_rank_mannwhitney(graph1_nodes: List[Dict[str, Any]],
     Compares the percentile ranks of error nodes between two graphs using Mann-Whitney U test.
     Returns percentile ranks for both graphs along with the U statistic and p-value.
     """
+
     def get_error_percentiles(nodes: List[Dict[str, Any]]) -> List[float]:
         n = len(nodes)
         return [
@@ -119,6 +124,7 @@ def error_rank_mannwhitney(graph1_nodes: List[Dict[str, Any]],
         "u_statistic": u,
         "p_value": p_val
     }
+
 
 def top_k_error_proportion(graph_nodes: List[Dict[str, Any]], k: int) -> float:
     """
@@ -150,6 +156,7 @@ def ndcg_at_k(graph_nodes: List[Dict[str, Any]], k: int) -> float:
 
     return dcg / idcg if idcg > 0 else 0.0
 
+
 def average_precision(graph_nodes: List[Dict[str, Any]]) -> float:
     """
     Calculates the average precision (AP) for error node ranking.
@@ -168,8 +175,38 @@ def average_precision(graph_nodes: List[Dict[str, Any]]) -> float:
 
     return cum_precision / num_hits if num_hits > 0 else 0.0
 
+
+def extract_raw_values(pair_results, ks: List[int] = None):
+    """
+    Extracts the values for individual samples from all pair results.
+    """
+    if ks is None:
+        ks = [5, 10, 20]
+
+    g1 = {"top_k": {k: [] for k in ks}, "ndcg": {k: [] for k in ks}, "ap": []}
+    g2 = {"top_k": {k: [] for k in ks}, "ndcg": {k: [] for k in ks}, "ap": []}
+
+    for res in pair_results:
+
+        # Top-K
+        for k in ks:
+            g1["top_k"][k].append(res["top_k_error_proportion"][f"top_{k}"]["metric_graph1"])
+            g2["top_k"][k].append(res["top_k_error_proportion"][f"top_{k}"]["metric_graph2"])
+
+        # NDCG
+        for k in ks:
+            g1["ndcg"][k].append(res["ndcg"][f"ndcg@{k}"]["metric_graph1"])
+            g2["ndcg"][k].append(res["ndcg"][f"ndcg@{k}"]["metric_graph2"])
+
+        # AP
+        g1["ap"].append(res["average_precision"]["metric_graph1"])
+        g2["ap"].append(res["average_precision"]["metric_graph2"])
+
+    return g1, g2
+
+
 def compare_rankings(graph1_nodes: List[Dict[str, Any]], graph2_nodes: List[Dict[str, Any]],
-                    ks: Optional[List[int]] = None, n_permutations: int = 500) -> Dict[str, Any]:
+                     ks: Optional[List[int]] = None, n_permutations: int = 500) -> Dict[str, Any]:
     """
     Compares the ranking quality of error nodes between two graphs using multiple metrics.
     Computes Mann-Whitney U test, top-k error proportions, NDCG@k, and average precision.
@@ -250,7 +287,7 @@ def run_error_analysis(prompts: List[str], model: str, submodel: str,
 
 
 def permutation_test_metric(graph1_nodes: List[Dict[str, Any]], graph2_nodes: List[Dict[str, Any]],
-                           metric_fn: Any, n_permutations: int = 10000) -> Dict[str, float]:
+                            metric_fn: Any, n_permutations: int = 10000) -> Dict[str, float]:
     """
     Performs a permutation test for any metric that takes a ranked list of nodes and returns a scalar.
     The metric_fn must accept (graph_nodes) and return a float.
@@ -334,50 +371,93 @@ def condition_level_stats(deltas: Dict[str, Any]) -> Dict[str, Any]:
     """
     stats = {"top_k": {}, "ndcg": {}, "ap": {}}
 
+    def compute_counts(vals):
+        vals = np.array(vals)
+        return (
+            int(np.sum(vals > 0)),  # g1 > g2
+            int(np.sum(vals < 0)),  # g1 < g2
+            int(np.sum(vals == 0)),  # tie
+        )
+
     # ---- Top-K
     for k, vals in deltas["top_k"].items():
+        vals = np.array(vals)
+        w = wilcoxon(vals)
+        t = ttest_rel(vals, np.zeros_like(vals))
+        c1_gt, c1_lt, c_eq = compute_counts(vals)
+
         stats["top_k"][k] = {
-            "wilcoxon": wilcoxon(vals, alternative='two-sided'),
-            "ttest": ttest_rel(vals, np.zeros_like(vals)),
-            "mean_delta": np.mean(vals),
-            "median_delta": np.median(vals),
+            "mean": float(vals.mean()),
+            "median": float(np.median(vals)),
+            "wilcoxon_stat": float(w.statistic),
+            "wilcoxon_p": float(w.pvalue),
+            "ttest_stat": float(t.statistic),
+            "ttest_p": float(t.pvalue),
+            "count_g1_gt_g2": c1_gt,
+            "count_g1_lt_g2": c1_lt,
+            "count_equal": c_eq,
         }
 
     # ---- NDCG
     for k, vals in deltas["ndcg"].items():
+        vals = np.array(vals)
+        w = wilcoxon(vals)
+        t = ttest_rel(vals, np.zeros_like(vals))
+        c1_gt, c1_lt, c_eq = compute_counts(vals)
+
         stats["ndcg"][k] = {
-            "wilcoxon": wilcoxon(vals, alternative='two-sided'),
-            "ttest": ttest_rel(vals, np.zeros_like(vals)),
-            "mean_delta": np.mean(vals),
-            "median_delta": np.median(vals),
+            "mean": float(vals.mean()),
+            "median": float(np.median(vals)),
+            "wilcoxon_stat": float(w.statistic),
+            "wilcoxon_p": float(w.pvalue),
+            "ttest_stat": float(t.statistic),
+            "ttest_p": float(t.pvalue),
+            "count_g1_gt_g2": c1_gt,
+            "count_g1_lt_g2": c1_lt,
+            "count_equal": c_eq,
         }
 
     # ---- AP
-    vals = deltas["ap"]
+    vals = np.array(deltas["ap"])
+    w = wilcoxon(vals)
+    t = ttest_rel(vals, np.zeros_like(vals))
+    c1_gt, c1_lt, c_eq = compute_counts(vals)
+
     stats["ap"] = {
-        "wilcoxon": wilcoxon(vals, alternative='two-sided'),
-        "ttest": ttest_rel(vals, np.zeros_like(vals)),
-        "mean_delta": np.mean(vals),
-        "median_delta": np.median(vals),
+        "mean": float(vals.mean()),
+        "median": float(np.median(vals)),
+        "wilcoxon_stat": float(w.statistic),
+        "wilcoxon_p": float(w.pvalue),
+        "ttest_stat": float(t.statistic),
+        "ttest_p": float(t.pvalue),
+        "count_g1_gt_g2": c1_gt,
+        "count_g1_lt_g2": c1_lt,
+        "count_equal": c_eq,
     }
 
     return stats
 
 
-def plot_delta_distribution(delta_values: List[float], title: str) -> None:
+def plot_delta_distribution(delta_values: List[float], title: str,
+                            save_path: Optional[Path] = None) -> None:
     """
     Creates a histogram plot showing the distribution of delta values.
     Visualizes the density distribution of metric differences between two conditions.
     """
-    plt.figure(figsize=(6,4))
+    plt.figure(figsize=(6, 4))
     plt.hist(delta_values, bins=20, alpha=0.6, density=True)
     plt.title(title)
-    plt.xlabel("Δ (metric1 - metric2)")
+    plt.xlabel(f"Δ ({CONDITION1} - {CONDITION2})")
     plt.ylabel("Density")
-    plt.show()
+    if save_path:
+        plt.savefig(save_path)
+        plt.close()
+    else:
+        plt.show()
 
 
-def boxplot_metric_family(metric_dict: Dict[int, List[float]], title_prefix: str) -> None:
+def boxplot_metric_family(metric_dict: Dict[int, List[float]], title_prefix: str,
+                          save_path: Optional[Path] = None) -> None:
     """
     Creates boxplot visualizations for a group of related metrics across different K values.
     The metric_dict should map K values to lists of delta values.
@@ -386,12 +466,17 @@ def boxplot_metric_family(metric_dict: Dict[int, List[float]], title_prefix: str
     ks = sorted(metric_dict.keys())
     data = [metric_dict[k] for k in ks]
 
-    plt.figure(figsize=(6,4))
+    plt.figure(figsize=(6, 4))
     plt.boxplot(data, labels=[str(k) for k in ks])
     plt.title(f"{title_prefix}: Δ distributions")
     plt.xlabel("K")
-    plt.ylabel("Δ (metric1 - metric2)")
-    plt.show()
+    plt.ylabel(f"Δ ({CONDITION1} - {CONDITION2})")
+    if save_path:
+        plt.savefig(save_path)
+        plt.close()
+    else:
+        plt.show()
+
 
 def stats_to_csv(stats: dict[str, Any], filepath: Path) -> pd.DataFrame:
     """
@@ -420,13 +505,68 @@ def stats_to_csv(stats: dict[str, Any], filepath: Path) -> pd.DataFrame:
     })
 
     df = pd.DataFrame(rows)
-    df.to_csv(filename, index=False)
+    df.to_csv(filepath, index=False)
     return df
 
 
+def raw_scores_to_csv(g1_values: Dict[str, Any], g2_values: Dict[str, Any],
+                      deltas: Dict[str, Any], filepath: Path,
+                      sample_ids: List[str] = None):
+    """
+    Saves the sample scores to a csv.
+    """
+    rows = []
+
+    # -------- Top-K --------
+    for k in g1_values["top_k"]:
+        g1_list = g1_values["top_k"][k]
+        g2_list = g2_values["top_k"][k]
+        d_list = deltas["top_k"][k]
+
+        for i, (g1, g2, d) in enumerate(zip(g1_list, g2_list, d_list)):
+            sample_id = i if not sample_ids else sample_ids[i]
+            rows.append({
+                "metric": f"top_k_{k}",
+                "sample": sample_id,
+                "g1_score": g1,
+                "g2_score": g2,
+                "delta": d
+            })
+
+    # -------- NDCG --------
+    for k in g1_values["ndcg"]:
+        g1_list = g1_values["ndcg"][k]
+        g2_list = g2_values["ndcg"][k]
+        d_list = deltas["ndcg"][k]
+
+        for i, (g1, g2, d) in enumerate(zip(g1_list, g2_list, d_list)):
+            sample_id = i if not sample_ids else sample_ids[i]
+            rows.append({
+                "metric": f"ndcg_{k}",
+                "sample": sample_id,
+                "g1_score": g1,
+                "g2_score": g2,
+                "delta": d
+            })
+
+    # -------- AP --------
+    for i, (g1, g2, d) in enumerate(zip(g1_values["ap"], g2_values["ap"], deltas["ap"])):
+        sample_id = i if not sample_ids else sample_ids[i]
+        rows.append({
+            "metric": "average_precision",
+            "sample": sample_id,
+            "g1_score": g1,
+            "g2_score": g2,
+            "delta": d
+        })
+
+    df = pd.DataFrame(rows)
+    df.to_csv(filepath, index=False)
+    return df
+
 
 def analyze_condition(pair_results: List[Dict[str, Any]],
-                     ks: Optional[List[int]] = None, show_plots: bool = False,
+                      ks: Optional[List[int]] = None, sample_ids: List[str] = None,
                       save_path: Path = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Performs comprehensive statistical analysis and visualization of error ranking metrics.
@@ -438,21 +578,21 @@ def analyze_condition(pair_results: List[Dict[str, Any]],
 
     deltas = extract_metric_deltas(pair_results, ks)
     stats = condition_level_stats(deltas)
-
-    # ----- Visualizations -----
-
-    if show_plots:
-        # Top-K boxplot
-        boxplot_metric_family(deltas["top_k"], "Top-K Error Proportion")
-
-        # NDCG boxplot
-        boxplot_metric_family(deltas["ndcg"], "NDCG@K")
-
-        # AP distribution
-        plot_delta_distribution(deltas["ap"], "Average Precision Δ Distribution")
+    g1_values, g2_values = extract_raw_values(pair_results)
+    raw_scores_to_csv(g1_values, g2_values, deltas, sample_ids=sample_ids,
+                      filepath=save_path / "error-results-individual.csv")
 
     if save_path:
-        stats_to_csv(stats, filepath=save_path)
+        # Save plots to files
+        boxplot_metric_family(deltas["top_k"], "Top-K Error Proportion",
+                              save_path=save_path / "topk_boxplot.png")
+        boxplot_metric_family(deltas["ndcg"], "NDCG@K",
+                              save_path=save_path / "ndcg_boxplot.png")
+        plot_delta_distribution(deltas["ap"], "Average Precision Δ Distribution",
+                                save_path=save_path / "ap_distribution.png")
+
+        # Save stats to CSV
+        stats_to_csv(stats, filepath=save_path / "error-results.csv")
         print(f"Saved error results to: {save_path}")
 
     return stats, deltas

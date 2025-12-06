@@ -59,9 +59,10 @@ def run_for_config(config_dir: Path, config_name: str) -> tuple[Optional[dict], 
     graph_dir = os.path.join(base_save_path, "graphs")
 
     prompt = user_select_prompt(prompt_default=main_prompt, graph_dir=graph_dir)
-    prompt_ids = PROMPT_IDS_TRIPLETS if len(diff_prompts) == 3 else PROMPT_ID_PAIRS
+    all_prompts = [prompt] + diff_prompts + sim_prompts
+    prompt_ids = PROMPT_IDS_TRIPLETS if len(all_prompts) == 3 else PROMPT_ID_PAIRS
     prompt2ids = {p: (prompt_ids[index] if len(prompt_ids) > index else p)
-                  for index, p in enumerate([prompt] + diff_prompts)}
+                  for index, p in enumerate(all_prompts)}
     error_analysis_results = None
     if selected_task == Task.PROMPT_SUBGRAPH_COMPARE:
         print(f"\nStarting run for {config_name} with model {model} and submodel {submodel}")
@@ -73,8 +74,8 @@ def run_for_config(config_dir: Path, config_name: str) -> tuple[Optional[dict], 
         metrics = {prompt2ids.get(p, p): res for p, res in metrics.items()}
         print("\n".join([f"{prompt} {[f'{metric:.3f}' for metric in metric_vals]}"
                          for prompt, metric_vals in metrics.items()]))
-        if diff_prompts and RUN_ERROR_ANALYSIS:
-            error_analysis_results = run_error_ranking(prompt1=prompt, prompt2=diff_prompts[-1], model=model,
+        if RUN_ERROR_ANALYSIS:
+            error_analysis_results = run_error_ranking(prompt1=prompt, prompt2=all_prompts[-1], model=model,
                                                        submodel=submodel, graph_dir=graph_dir)
         print("==================================\n")
     elif selected_task == Task.TOKEN_SUBGRAPH_COMPARE:
@@ -113,9 +114,10 @@ if __name__ == "__main__":
 
     results_df = pd.DataFrame(all_results)
     results_dir = datetime.now().strftime("%Y%m%d_%H%M%S")
-    os.makedirs(OUTPUT_PATH, exist_ok=True)
-    results_df.to_csv(os.path.join(OUTPUT_PATH, results_dir, f"overlap-metrics.csv"))
+    save_path = Path(OUTPUT_PATH) / results_dir
+    os.makedirs(save_path, exist_ok=True)
+    results_df.to_csv(save_path / f"overlap-metrics.csv")
 
     if all(error_pair_results):
-        stats, deltas = analyze_condition(error_pair_results,
-                                          save_path=Path(OUTPUT_PATH) / results_dir / "error-results.csv")
+        stats, deltas = analyze_condition(error_pair_results, sample_ids=CONFIG_NAMES,
+                                          save_path=save_path)
