@@ -1,7 +1,7 @@
 import unittest
 import pandas as pd
 from unittest.mock import patch, MagicMock
-from subgraph_comparisons import nodes_not_in, calculate_intersection_metrics, get_links_union
+from subgraph_comparisons import nodes_not_in, calculate_intersection_metrics, get_links_overlap
 from attribution_graph_utils import get_links_from_node
 
 
@@ -554,7 +554,7 @@ class TestGraphFunctions(unittest.TestCase):
 
     def test_get_links_union_structure(self):
         """Test get_links_union returns correct nested dictionary structure."""
-        links_lookup, relative_contributions = get_links_union(
+        links_lookup, relative_contributions = get_links_overlap(
             self.graph_metadata1,
             self.graph_metadata2
         )
@@ -580,7 +580,7 @@ class TestGraphFunctions(unittest.TestCase):
 
     def test_get_links_union_intersecting_links(self):
         """Test get_links_union handles intersecting links correctly."""
-        links_lookup, relative_contributions = get_links_union(
+        links_lookup, relative_contributions = get_links_overlap(
             self.graph_metadata1,
             self.graph_metadata2
         )
@@ -597,7 +597,7 @@ class TestGraphFunctions(unittest.TestCase):
 
     def test_get_links_union_non_intersecting_links(self):
         """Test get_links_union handles non-intersecting links with zero weights."""
-        links_lookup, relative_contributions = get_links_union(
+        links_lookup, relative_contributions = get_links_overlap(
             self.graph_metadata1,
             self.graph_metadata2
         )

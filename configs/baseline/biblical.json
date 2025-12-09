@@ -1,7 +1,8 @@
 {
-  "MAIN_PROMPT":     "And they will walk forward unafraid, hearing the quiet promise carried on the winds above the restless",
+  "MAIN_PROMPT": "And they will walk forward unafraid, hearing the quiet promise carried on the winds above the restless",
   "DIFF_PROMPTS": [
-    "I looked and saw an entirely new sky and a new world, because the previous sky and world had vanished, and there was no more"
+    "I looked and saw an entirely new sky and a new world, because the previous sky and world had vanished, and there was no more",
+    "There are long sandy stretches, boardwalks above the dunes, paved walking and biking trails, surf spots, and rocky cliffs that drop dramatically into the"
   ],
   "SIM_PROMPTS": [
   ]

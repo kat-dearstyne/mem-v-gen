@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple, Dict, Any, Set
 
 import numpy as np
 import pandas as pd
+from numpy import ndarray, dtype
 from pandas import DataFrame
 from attribution_graph_utils import create_node_df, create_or_load_graph, create_subgraph_from_selected_features, \
     get_subgraphs, get_linked_sources, get_top_output_logit_node, get_links_from_node, \
@@ -12,7 +13,8 @@ from common_utils import get_feature_from_node_id, create_node_id, Feature, get_
     get_id_without_pos
 
 IntersectionMetrics = namedtuple("IntersectionMetrics",
-                                 ['jaccard_index', 'relative_contribution', 'frac_from_intersection'])
+                                 ['jaccard_index', 'relative_jaccard', 'frac_from_intersection',
+                                  'output_probability'])
 
 
 def nodes_not_in(main_prompt: str, prompts2compare: List[str], model: str, submodel: str,
@@ -38,11 +40,8 @@ def nodes_not_in(main_prompt: str, prompts2compare: List[str], model: str, submo
         node_df2 = create_node_df(graph_metadata2, exclude_embeddings=True, exclude_errors=True,
                                   exclude_logits=True)
         node_df2 = node_df2.drop_duplicates(subset=['layer', 'feature'])
-        if debug:
-            output_node = get_top_output_logit_node(graph_metadata2['nodes'])
-            print(f"Prompt {i + 1} output: ", output_node['clerp'])
         metrics[prompt] = calculate_intersection_metrics(node_df1, node_df2, graph_metadata1, graph_metadata2,
-                                                         debug=debug)
+                                                         prompt_num=i+1, debug=debug)
         unique_features = filter_for_unique_features(unique_features, node_df2)
         all_nodes.append({get_id_without_pos(node['node_id']): node for node in graph_metadata2['nodes']})
     if return_metrics:
@@ -51,7 +50,7 @@ def nodes_not_in(main_prompt: str, prompts2compare: List[str], model: str, submo
 
 
 def calculate_intersection_metrics(node_df1: pd.DataFrame, node_df2: pd.DataFrame,
-                                   graph_metadata1: dict, graph_metadata2: dict,
+                                   graph_metadata1: dict, graph_metadata2: dict, prompt_num: int = 2,
                                    debug: bool = False) -> IntersectionMetrics:
     """
     Calculates the jaccard index between two dataframes,
@@ -61,13 +60,17 @@ def calculate_intersection_metrics(node_df1: pd.DataFrame, node_df2: pd.DataFram
     node_df1 = node_df1.drop_duplicates(subset=['layer', 'feature'])
     node_df2 = node_df2.drop_duplicates(subset=['layer', 'feature'])
     intersection = pd.merge(node_df1, node_df2, on=['layer', 'feature'], how='inner')[['layer', 'feature']]
-    _, relative_contributions = get_links_union(graph_metadata1, graph_metadata2)
+    _, (intersection_weight, total_weight), output_node2 = get_links_overlap(graph_metadata1, graph_metadata2)
+    if debug:
+        print(f"Prompt {prompt_num} output: ", output_node2['clerp'])
+    relative_jaccard = intersection_weight.sum() / total_weight.sum()
     jaccard_index = len(intersection) / (len(node_df1) + len(node_df2) - len(intersection))
     frac_from_intersection = len(intersection) / len(node_df1)
-    return IntersectionMetrics(jaccard_index, relative_contributions[1], frac_from_intersection)
+    return IntersectionMetrics(jaccard_index, relative_jaccard, frac_from_intersection, output_node2['token_prob'])
 
 
-def get_links_union(graph_metadata1: dict, graph_metadata2: dict) -> tuple[dict, list]:
+def get_links_overlap(graph_metadata1: dict,
+                      graph_metadata2: dict) -> tuple[dict[str, Any], tuple[ndarray, ndarray], dict[str, Any]]:
     """
     Creates a nested dictionary with all target_ids at the top level, linked source_ids at the next level
     and finally link weights as the values which are represented as lists ([weight graph 1, weight graph 2]).
@@ -77,31 +80,50 @@ def get_links_union(graph_metadata1: dict, graph_metadata2: dict) -> tuple[dict,
     output_logit_id1 = get_id_without_pos(get_top_output_logit_node(graph_metadata1['nodes'])['node_id'])
     output_node2 = [node for node in get_output_logits(graph_metadata2['nodes']) if
                     node['node_id'].startswith(output_logit_id1)]
+    assert len(output_node2) == 1, "Output tokens don't match!"
     links1 = get_links_from_node(graph_metadata1, include_features_only=True)
     links2 = get_links_from_node(graph_metadata2,
                                  starting_node=output_node2[0] if len(output_node2) > 0 else None,
                                  include_features_only=True)
     links_lookup = {}
-    intersection = np.array([0.0, 0.0])
-    total = np.array([0.0, 0.0])
+
+    # Collect weights in lists for stable summation
+    total_weights_1 = []
+    total_weights_2 = []
+    intersection_weights_1 = []
+    intersection_weights_2 = []
 
     def add_link(target, source, weight, index):
         target, source = get_id_without_pos(target), get_id_without_pos(source)
         if target not in links_lookup:
             links_lookup[target] = {}
         links_lookup[target][source] = [weight, 0] if index == 0 else [0, weight]
-        total[index] += weight
 
-    [add_link(link['target'], link['source'], link['weight'], 0) for link in links1]
+    for link in links1:
+        add_link(link['target'], link['source'], link['weight'], 0)
+        total_weights_1.append(link['weight'])
+
     for link in links2:
         target_id, source_id = get_id_without_pos(link['target']), get_id_without_pos(link['source'])
         if target_id in links_lookup and source_id in links_lookup[target_id]:
+            intersection_weights_1.append(links_lookup[target_id][source_id][0])
+            intersection_weights_2.append(link['weight'])
             links_lookup[target_id][source_id][-1] = link['weight']
-            intersection += np.array(links_lookup[target_id][source_id])
-            total[-1] += link['weight']
         else:
             add_link(target_id, source_id, link['weight'], 1)
-    return links_lookup, (intersection / total).tolist()
+        total_weights_2.append(link['weight'])
+
+    # Use sorted summation for numerical stability
+    intersection = np.array([
+        sum(sorted(intersection_weights_1)),
+        sum(sorted(intersection_weights_2))
+    ])
+    total = np.array([
+        sum(sorted(total_weights_1)),
+        sum(sorted(total_weights_2))
+    ])
+
+    return links_lookup, (intersection, total), output_node2[0]
 
 
 def get_relative_contribution(links: List[dict], all_features: pd.DataFrame, features_of_interest: pd.DataFrame,

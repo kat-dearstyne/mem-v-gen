@@ -3,20 +3,41 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
 import matplotlib.pyplot as plt
+import seaborn as sns
 import numpy as np
 import pandas as pd
 from scipy.stats import mannwhitneyu, wilcoxon, ttest_rel
+
+from constants import COLORS, CUSTOM_PALETTE
+
+# Set up plot styling
+sns.set_theme(style="whitegrid")
+sns.set_palette(CUSTOM_PALETTE)
+plt.rcParams.update({
+    'font.family': 'sans-serif',
+    'font.size': 11,
+    'axes.titlesize': 13,
+    'axes.titleweight': 'bold',
+    'axes.labelsize': 11,
+    'xtick.labelsize': 10,
+    'ytick.labelsize': 10,
+    'figure.facecolor': 'white',
+    'axes.facecolor': 'white',
+    'axes.edgecolor': '#333333',
+    'axes.linewidth': 0.8,
+    'grid.alpha': 0.3,
+})
 
 from attribution_graph_utils import create_or_load_graph, get_top_output_logit_node, get_output_logits, \
     get_nodes_linked_to_target, get_node_dict, get_links_from_node
 from common_utils import get_id_without_pos
 
-CONDITION1 = "verbatim"
-CONDITION2 = "generalized"
+CONDITION1 = "memorized"
+CONDITION2 = "non-memorized"
 
 
 def run_error_ranking(prompt1: str, prompt2: str, model: str, submodel: str,
-                      graph_dir: Optional[str]) -> Dict[str, Any]:
+                      graph_dir: Optional[str], use_same_token: bool = True) -> Dict[str, Any]:
     """
     Compare how highly error nodes rank in two graphs using a Mann–Whitney U test.
     Returns a dictionary with percentile ranks and statistical test results.
@@ -28,8 +49,11 @@ def run_error_ranking(prompt1: str, prompt2: str, model: str, submodel: str,
     output_node1 = get_top_output_logit_node(graph_metadata1['nodes'])
     output_nodes2 = [node for node in get_output_logits(graph_metadata2['nodes']) if
                      node['node_id'].startswith(get_id_without_pos(output_node1['node_id']))]
-    assert len(output_nodes2) >= 1, (f"Can't find node corresponding with {output_node1['clerp']} in "
-                                     f"second prompt.")
+    if use_same_token:
+        assert len(output_nodes2) >= 1, (f"Can't find node corresponding with {output_node1['clerp']} in "
+                                         f"second prompt.")
+    else:
+        output_nodes2 = [get_top_output_logit_node(graph_metadata2['nodes'])]
     linked_nodes1 = get_nodes_linked_to_target(graph_metadata1, output_node1)
     linked_nodes2 = get_nodes_linked_to_target(graph_metadata2, output_nodes2[0])
     results = compare_rankings(linked_nodes1, linked_nodes2)
@@ -438,19 +462,148 @@ def condition_level_stats(deltas: Dict[str, Any]) -> Dict[str, Any]:
     return stats
 
 
+def pooled_condition_stats(all_deltas: Dict[str, Dict[str, Any]],
+                            ks: Optional[List[int]] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    Pools delta values across all conditions and computes summary statistics.
+    Uses one-sided Wilcoxon signed-rank test (alternative="greater") to determine
+    whether the base condition consistently outperforms others.
+
+    Args:
+        all_deltas: Dictionary mapping condition_name -> deltas dict
+        ks: List of k values for top-k and NDCG metrics
+
+    Returns:
+        Tuple of (pooled_stats, pooled_deltas)
+    """
+    if ks is None:
+        ks = [5, 10, 20]
+
+    # Initialize pooled deltas
+    pooled_deltas = {
+        "top_k": {k: [] for k in ks},
+        "ndcg": {k: [] for k in ks},
+        "ap": []
+    }
+
+    # Pool deltas from all conditions
+    for condition_name, deltas in all_deltas.items():
+        for k in ks:
+            pooled_deltas["top_k"][k].extend(deltas["top_k"][k])
+            pooled_deltas["ndcg"][k].extend(deltas["ndcg"][k])
+        pooled_deltas["ap"].extend(deltas["ap"])
+
+    # Compute stats with one-sided Wilcoxon test
+    stats = {"top_k": {}, "ndcg": {}, "ap": {}}
+
+    def compute_counts(vals):
+        vals = np.array(vals)
+        return (
+            int(np.sum(vals > 0)),  # base > other
+            int(np.sum(vals < 0)),  # base < other
+            int(np.sum(vals == 0)),  # tie
+        )
+
+    # ---- Top-K
+    for k, vals in pooled_deltas["top_k"].items():
+        vals = np.array(vals)
+        # One-sided test: is base condition greater?
+        try:
+            w = wilcoxon(vals, alternative="greater")
+            wilcoxon_stat, wilcoxon_p = float(w.statistic), float(w.pvalue)
+        except ValueError:
+            # All values might be zero
+            wilcoxon_stat, wilcoxon_p = np.nan, np.nan
+
+        c1_gt, c1_lt, c_eq = compute_counts(vals)
+
+        stats["top_k"][k] = {
+            "mean": float(vals.mean()),
+            "median": float(np.median(vals)),
+            "wilcoxon_stat_onesided": wilcoxon_stat,
+            "wilcoxon_p_onesided": wilcoxon_p,
+            "count_base_gt_other": c1_gt,
+            "count_base_lt_other": c1_lt,
+            "count_equal": c_eq,
+            "n_samples": len(vals),
+        }
+
+    # ---- NDCG
+    for k, vals in pooled_deltas["ndcg"].items():
+        vals = np.array(vals)
+        try:
+            w = wilcoxon(vals, alternative="greater")
+            wilcoxon_stat, wilcoxon_p = float(w.statistic), float(w.pvalue)
+        except ValueError:
+            wilcoxon_stat, wilcoxon_p = np.nan, np.nan
+
+        c1_gt, c1_lt, c_eq = compute_counts(vals)
+
+        stats["ndcg"][k] = {
+            "mean": float(vals.mean()),
+            "median": float(np.median(vals)),
+            "wilcoxon_stat_onesided": wilcoxon_stat,
+            "wilcoxon_p_onesided": wilcoxon_p,
+            "count_base_gt_other": c1_gt,
+            "count_base_lt_other": c1_lt,
+            "count_equal": c_eq,
+            "n_samples": len(vals),
+        }
+
+    # ---- AP
+    vals = np.array(pooled_deltas["ap"])
+    try:
+        w = wilcoxon(vals, alternative="greater")
+        wilcoxon_stat, wilcoxon_p = float(w.statistic), float(w.pvalue)
+    except ValueError:
+        wilcoxon_stat, wilcoxon_p = np.nan, np.nan
+
+    c1_gt, c1_lt, c_eq = compute_counts(vals)
+
+    stats["ap"] = {
+        "mean": float(vals.mean()),
+        "median": float(np.median(vals)),
+        "wilcoxon_stat_onesided": wilcoxon_stat,
+        "wilcoxon_p_onesided": wilcoxon_p,
+        "count_base_gt_other": c1_gt,
+        "count_base_lt_other": c1_lt,
+        "count_equal": c_eq,
+        "n_samples": len(vals),
+    }
+
+    return stats, pooled_deltas
+
+
 def plot_delta_distribution(delta_values: List[float], title: str,
                             save_path: Optional[Path] = None) -> None:
     """
     Creates a histogram plot showing the distribution of delta values.
     Visualizes the density distribution of metric differences between two conditions.
     """
-    plt.figure(figsize=(6, 4))
-    plt.hist(delta_values, bins=20, alpha=0.6, density=True)
-    plt.title(title)
-    plt.xlabel(f"Δ ({CONDITION1} - {CONDITION2})")
-    plt.ylabel("Density")
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    # Create histogram with KDE overlay
+    sns.histplot(delta_values, bins=15, kde=True, color=COLORS['turquoise'], alpha=0.7,
+                 edgecolor='white', linewidth=0.8, ax=ax)
+
+    # Add vertical line at zero for reference
+    ax.axvline(x=0, color='#555555', linestyle='--', linewidth=1.5, alpha=0.7, label='No difference')
+
+    # Add mean line
+    mean_val = np.mean(delta_values)
+    ax.axvline(x=mean_val, color=COLORS['pastel_orange'], linestyle='-',
+               linewidth=2, alpha=0.9, label=f'Mean: {mean_val:.3f}')
+
+    ax.set_title(title, pad=15)
+    ax.set_xlabel(f"Δ ({CONDITION1} - {CONDITION2})", labelpad=10)
+    ax.set_ylabel("Density", labelpad=10)
+    ax.legend(frameon=True, fancybox=True, shadow=True, fontsize=9)
+
+    sns.despine(left=True, bottom=True)
+    plt.tight_layout()
+
     if save_path:
-        plt.savefig(save_path)
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
         plt.close()
     else:
         plt.show()
@@ -464,15 +617,35 @@ def boxplot_metric_family(metric_dict: Dict[int, List[float]], title_prefix: str
     Useful for visualizing NDCG@k or top-k error proportion across different k values.
     """
     ks = sorted(metric_dict.keys())
-    data = [metric_dict[k] for k in ks]
 
-    plt.figure(figsize=(6, 4))
-    plt.boxplot(data, labels=[str(k) for k in ks])
-    plt.title(f"{title_prefix}: Δ distributions")
-    plt.xlabel("K")
-    plt.ylabel(f"Δ ({CONDITION1} - {CONDITION2})")
+    # Prepare data in long format for seaborn
+    plot_data = []
+    for k in ks:
+        for val in metric_dict[k]:
+            plot_data.append({'K': f'K={k}', 'Delta': val})
+    df = pd.DataFrame(plot_data)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    # Create boxplot with strip plot overlay
+    sns.boxplot(x='K', y='Delta', data=df, palette=CUSTOM_PALETTE, width=0.5,
+                linewidth=1.5, fliersize=0, ax=ax)
+    sns.stripplot(x='K', y='Delta', data=df, color='#333333', alpha=0.5,
+                  size=4, jitter=0.15, ax=ax)
+
+    # Add horizontal line at zero
+    ax.axhline(y=0, color='#555555', linestyle='--', linewidth=1.5, alpha=0.7)
+
+    ax.set_title(f"{title_prefix}: Δ Distributions", pad=15)
+    ax.set_xlabel("Top-K Value", labelpad=10)
+    ax.set_ylabel(f"Δ ({CONDITION1} - {CONDITION2})", labelpad=10)
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+
+    sns.despine(left=True, bottom=True)
+    plt.tight_layout()
+
     if save_path:
-        plt.savefig(save_path)
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
         plt.close()
     else:
         plt.show()
@@ -565,34 +738,87 @@ def raw_scores_to_csv(g1_values: Dict[str, Any], g2_values: Dict[str, Any],
     return df
 
 
-def analyze_condition(pair_results: List[Dict[str, Any]],
-                      ks: Optional[List[int]] = None, sample_ids: List[str] = None,
-                      save_path: Path = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def analyze_conditions(pair_results: dict[str, Dict[str, Dict[str, Any]]],
+                       ks: Optional[List[int]] = None,
+                       save_path: Path = None) -> Dict[str, Tuple[Dict[str, Any], Dict[str, Any]]]:
     """
     Performs comprehensive statistical analysis and visualization of error ranking metrics.
     Extracts delta values, computes statistical tests, and generates visualizations.
-    Returns statistics dictionary and deltas dictionary.
+    Also pools results across all conditions to evaluate whether the base condition
+    consistently outperforms all others.
+
+    Args:
+        pair_results: Dictionary mapping sample_id -> condition_name -> results_dict
+        ks: List of k values for top-k and NDCG metrics
+        save_path: Base path for saving results (subdirs created per condition)
+
+    Returns:
+        Dictionary mapping condition_name -> (stats, deltas) tuple
+        Includes special key "pooled" for pooled analysis across all conditions
     """
     if ks is None:
         ks = [5, 10, 20]
 
-    deltas = extract_metric_deltas(pair_results, ks)
-    stats = condition_level_stats(deltas)
-    g1_values, g2_values = extract_raw_values(pair_results)
-    raw_scores_to_csv(g1_values, g2_values, deltas, sample_ids=sample_ids,
-                      filepath=save_path / "error-results-individual.csv")
+    sample_ids = list(pair_results.keys())
+
+    # Get all condition names from the first sample
+    first_sample = next(iter(pair_results.values()))
+    condition_names = list(first_sample.keys())
+
+    all_results = {}
+    all_deltas = {}
+
+    for condition_name in condition_names:
+        # Extract results for this condition across all samples
+        condition_results = [pair_results[sample_id][condition_name] for sample_id in sample_ids]
+
+        deltas = extract_metric_deltas(condition_results, ks)
+        stats = condition_level_stats(deltas)
+        g1_values, g2_values = extract_raw_values(condition_results)
+
+        if save_path:
+            # Create condition subdirectory
+            condition_save_path = save_path / condition_name
+            condition_save_path.mkdir(parents=True, exist_ok=True)
+
+            raw_scores_to_csv(g1_values, g2_values, deltas, sample_ids=sample_ids,
+                              filepath=condition_save_path / "error-results-individual.csv")
+
+            # Save plots to files
+            boxplot_metric_family(deltas["top_k"], "Top-K Error Proportion",
+                                  save_path=condition_save_path / "topk_boxplot.png")
+            boxplot_metric_family(deltas["ndcg"], "NDCG@K",
+                                  save_path=condition_save_path / "ndcg_boxplot.png")
+            plot_delta_distribution(deltas["ap"], "Average Precision Δ Distribution",
+                                    save_path=condition_save_path / "ap_distribution.png")
+
+            # Save stats to CSV
+            stats_to_csv(stats, filepath=condition_save_path / "error-results.csv")
+            print(f"Saved error results for condition '{condition_name}' to: {condition_save_path}")
+
+        all_results[condition_name] = (stats, deltas)
+        all_deltas[condition_name] = deltas
+
+    # Pooled analysis across all conditions
+    pooled_stats, pooled_deltas = pooled_condition_stats(all_deltas, ks)
 
     if save_path:
-        # Save plots to files
-        boxplot_metric_family(deltas["top_k"], "Top-K Error Proportion",
-                              save_path=save_path / "topk_boxplot.png")
-        boxplot_metric_family(deltas["ndcg"], "NDCG@K",
-                              save_path=save_path / "ndcg_boxplot.png")
-        plot_delta_distribution(deltas["ap"], "Average Precision Δ Distribution",
-                                save_path=save_path / "ap_distribution.png")
+        # Create pooled subdirectory
+        pooled_save_path = save_path / "pooled"
+        pooled_save_path.mkdir(parents=True, exist_ok=True)
 
-        # Save stats to CSV
-        stats_to_csv(stats, filepath=save_path / "error-results.csv")
-        print(f"Saved error results to: {save_path}")
+        # Save plots for pooled results
+        boxplot_metric_family(pooled_deltas["top_k"], "Top-K Error Proportion (Pooled)",
+                              save_path=pooled_save_path / "topk_boxplot.png")
+        boxplot_metric_family(pooled_deltas["ndcg"], "NDCG@K (Pooled)",
+                              save_path=pooled_save_path / "ndcg_boxplot.png")
+        plot_delta_distribution(pooled_deltas["ap"], "Average Precision Δ Distribution (Pooled)",
+                                save_path=pooled_save_path / "ap_distribution.png")
 
-    return stats, deltas
+        # Save pooled stats to CSV
+        stats_to_csv(pooled_stats, filepath=pooled_save_path / "error-results.csv")
+        print(f"Saved pooled error results to: {pooled_save_path}")
+
+    all_results["pooled"] = (pooled_stats, pooled_deltas)
+
+    return all_results

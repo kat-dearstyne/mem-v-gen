@@ -1,8 +1,7 @@
 {
-  "MAIN_PROMPT": "Lorem Ipsum is simply dummy text of the",
+  "MAIN_PROMPT": "The copy room is used for",
   "DIFF_PROMPTS": [
     "Lorem Ipsum is merely placeholder text of the",
-    "The copy room is used for",
     "The building now operates as a center for Fed-Ex copying and"
   ],
   "SIM_PROMPTS": [

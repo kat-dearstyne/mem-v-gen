@@ -1,7 +1,8 @@
 {
-  "MAIN_PROMPT":     "Shadows thin in rising light\nVoices call for something more\nEvery mouth reveals the craving\nAn intense pang of",
+  "MAIN_PROMPT": "Shadows thin in rising light\nVoices call for something more\nEvery mouth reveals the craving\nAn intense pang of",
   "DIFF_PROMPTS": [
-    "And the world would finally be united\nImagine having nothing to own\nI'm not sure if you can\nNo need for thirst or"
+    "And the world would finally be united\nImagine having nothing to own\nI'm not sure if you can\nNo need for thirst or",
+    "More people are now left with no choice but to resort to consuming wild or raw inedible food to cope with their"
   ],
   "SIM_PROMPTS": [
   ]
