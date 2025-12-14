@@ -235,9 +235,14 @@ def plot_metric_line(df: pd.DataFrame,
                      ylabel: str,
                      save_path: Optional[Path] = None,
                      condition_order: Optional[List[str]] = None,
-                     config_order: Optional[List[str]] = None) -> None:
+                     config_order: Optional[List[str]] = None,
+                     extra_series: Optional[dict] = None) -> None:
     """
     Creates a line plot showing metric trends across configs for each condition.
+
+    Args:
+        extra_series: Optional dict with 'label' and 'data' (pd.Series indexed by config_name)
+                      to plot an additional line on the chart.
     """
     if condition_order is None:
         condition_order = df['prompt_type'].unique().tolist()
@@ -255,6 +260,13 @@ def plot_metric_line(df: pd.DataFrame,
         ax.plot(config_order, cond_df[metric_col],
                 marker='o', markersize=8, linewidth=2,
                 color=palette[i], label=condition)
+
+    # Plot extra series if provided
+    if extra_series is not None:
+        extra_data = extra_series['data'].reindex(config_order)
+        ax.plot(config_order, extra_data,
+                marker='s', markersize=8, linewidth=2, linestyle='--',
+                color='#333333', label=extra_series['label'])
 
     ax.set_title(title, pad=15)
     ax.set_xlabel('Config', labelpad=10)
@@ -278,13 +290,15 @@ def plot_jaccard_line(df: pd.DataFrame,
                       title: str = "Jaccard Index by Config",
                       save_path: Optional[Path] = None,
                       condition_order: Optional[List[str]] = None,
-                      config_order: Optional[List[str]] = None) -> None:
+                      config_order: Optional[List[str]] = None,
+                      extra_series: Optional[dict] = None) -> None:
     """
     Creates a line plot showing Jaccard index trends across configs for each condition.
     """
     plot_metric_line(df, metric_col='jaccard_index', title=title,
                      ylabel='Jaccard Index', save_path=save_path,
-                     condition_order=condition_order, config_order=config_order)
+                     condition_order=condition_order, config_order=config_order,
+                     extra_series=extra_series)
 
 
 def plot_metric_vs_probability_scatter(df: pd.DataFrame,
@@ -440,6 +454,17 @@ def analyze_overlap(dir1: Path, dir2: Path,
     if config_order is None:
         config_order = sorted(df['config_name'].unique().tolist())
 
+    # Check for error-results-individual.csv in dir1 to add average_precision line
+    ap_series = None
+    error_results_path = Path(dir1) / "memorized vs. random" / "error-results-individual.csv"
+    if error_results_path.exists():
+        error_df = pd.read_csv(error_results_path)
+        ap_df = error_df[error_df['metric'] == 'top_k_10']
+        ap_series = {
+            'label': 'Average Precision',
+            'data': ap_df.set_index('sample')['g1_score']
+        }
+
     if save_dir:
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -452,7 +477,8 @@ def analyze_overlap(dir1: Path, dir2: Path,
         plot_jaccard_boxplot(df, save_path=save_dir / "jaccard_boxplot.png",
                              condition_order=condition_order)
         plot_jaccard_line(df, save_path=save_dir / "jaccard_line.png",
-                          condition_order=condition_order, config_order=config_order)
+                          condition_order=condition_order, config_order=config_order,
+                          extra_series=ap_series)
 
         # Weighted Jaccard visualizations
         plot_metric_by_condition(df, metric_col='relative_jaccard',
@@ -504,7 +530,8 @@ def analyze_overlap(dir1: Path, dir2: Path,
         plot_jaccard_by_condition(df, condition_order=condition_order, config_order=config_order)
         plot_jaccard_heatmap(df, condition_order=condition_order, config_order=config_order)
         plot_jaccard_boxplot(df, condition_order=condition_order)
-        plot_jaccard_line(df, condition_order=condition_order, config_order=config_order)
+        plot_jaccard_line(df, condition_order=condition_order, config_order=config_order,
+                          extra_series=ap_series)
 
         # Weighted Jaccard visualizations
         plot_metric_by_condition(df, metric_col='relative_jaccard',
@@ -582,10 +609,10 @@ def run_for_config(config_dir: Path, config_name: str,
         print("==================================")
 
         metrics = compare_prompt_subgraphs(main_prompt=prompt, diff_prompts=diff_prompts, sim_prompts=sim_prompts,
-                                           model=model, submodel=submodel, graph_dir=graph_dir, debug=True)
-        metrics = {prompt2ids.get(p, p): res for p, res in metrics.items()}
-        print("\n".join([f"{prompt} {[f'{metric:.3f}' for metric in metric_vals]}"
-                         for prompt, metric_vals in metrics.items()]))
+                                           model=model, submodel=submodel, graph_dir=graph_dir, filter_by_act_density=None,
+                                           debug=False)
+        if metrics:
+            metrics = {prompt2ids.get(p, p): res for p, res in metrics.items()}
         if run_error_analysis:
             error_analysis_results = {}
             for p, p_id in prompt2ids.items():
@@ -628,12 +655,14 @@ def run_for_all_configs(config_names: List[str] = None, config_dir: str = None,
         results, error_analysis_results = run_for_config(config_dir, config, submodel_num=submodel_num,
                                                          run_error_analysis=run_error_analysis)
         results: dict[str, IntersectionMetrics]
-        error_pair_results[config] = error_analysis_results
-        for i, (prompt, metrics) in enumerate(results.items()):
-            all_results["config_name"].append(config)
-            all_results["prompt_type"].append(prompt)
-            for metric_name, metric in zip(IntersectionMetrics._fields, metrics):
-                all_results[metric_name].append(metric)
+        if error_analysis_results:
+            error_pair_results[config] = error_analysis_results
+        if results:
+            for i, (prompt, metrics) in enumerate(results.items()):
+                all_results["config_name"].append(config)
+                all_results["prompt_type"].append(prompt)
+                for metric_name, metric in zip(IntersectionMetrics._fields, metrics):
+                    all_results[metric_name].append(metric)
 
     results_dir = datetime.now().strftime("%Y%m%d_%H%M%S")
     save_path = Path(OUTPUT_DIR) / results_dir
@@ -642,5 +671,5 @@ def run_for_all_configs(config_names: List[str] = None, config_dir: str = None,
     results_df = pd.DataFrame(all_results)
     results_df.to_csv(save_path / OVERLAP_ANALYSIS_FILENAME)
 
-    if all(error_pair_results):
+    if error_pair_results:
         analyze_conditions(error_pair_results, save_path=save_path)

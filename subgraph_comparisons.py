@@ -14,7 +14,7 @@ from common_utils import get_feature_from_node_id, create_node_id, Feature, get_
 
 IntersectionMetrics = namedtuple("IntersectionMetrics",
                                  ['jaccard_index', 'relative_jaccard', 'frac_from_intersection',
-                                  'output_probability'])
+                                  'shared_token', 'output_probability'])
 
 
 def nodes_not_in(main_prompt: str, prompts2compare: List[str], model: str, submodel: str,
@@ -41,7 +41,7 @@ def nodes_not_in(main_prompt: str, prompts2compare: List[str], model: str, submo
                                   exclude_logits=True)
         node_df2 = node_df2.drop_duplicates(subset=['layer', 'feature'])
         metrics[prompt] = calculate_intersection_metrics(node_df1, node_df2, graph_metadata1, graph_metadata2,
-                                                         prompt_num=i+1, debug=debug)
+                                                         prompt_num=i + 1, debug=debug)
         unique_features = filter_for_unique_features(unique_features, node_df2)
         all_nodes.append({get_id_without_pos(node['node_id']): node for node in graph_metadata2['nodes']})
     if return_metrics:
@@ -54,23 +54,37 @@ def calculate_intersection_metrics(node_df1: pd.DataFrame, node_df2: pd.DataFram
                                    debug: bool = False) -> IntersectionMetrics:
     """
     Calculates the jaccard index between two dataframes,
-    the ratio of weights of intersecting edges to the weights of the edges for graph1,
+    the weighted jaccard index (sum(min(w1,w2)) / sum(max(w1,w2)) for all edges),
     and the ratio of intersecting features to all features for graph1.
     """
     node_df1 = node_df1.drop_duplicates(subset=['layer', 'feature'])
     node_df2 = node_df2.drop_duplicates(subset=['layer', 'feature'])
     intersection = pd.merge(node_df1, node_df2, on=['layer', 'feature'], how='inner')[['layer', 'feature']]
-    _, (intersection_weight, total_weight), output_node2 = get_links_overlap(graph_metadata1, graph_metadata2)
+    links_lookup, _, output_node2 = get_links_overlap(graph_metadata1, graph_metadata2,
+                                                      raise_if_no_matching_tokens=debug)
     if debug:
         print(f"Prompt {prompt_num} output: ", output_node2['clerp'])
-    relative_jaccard = intersection_weight.sum() / total_weight.sum()
+        print(f"Graph URL: {graph_metadata2['metadata']['info']['url']}")
+
+    # Weighted Jaccard: sum(min(w1, w2)) / sum(max(w1, w2)) for all edges
+    min_weights = []
+    max_weights = []
+    for target, sources in links_lookup.items():
+        for source, (w1, w2) in sources.items():
+            min_weights.append(min(w1, w2))
+            max_weights.append(max(w1, w2))
+    relative_jaccard = sum(sorted(min_weights)) / sum(sorted(max_weights)) if max_weights else 0.0
+
     jaccard_index = len(intersection) / (len(node_df1) + len(node_df2) - len(intersection))
     frac_from_intersection = len(intersection) / len(node_df1)
-    return IntersectionMetrics(jaccard_index, relative_jaccard, frac_from_intersection, output_node2['token_prob'])
+    return IntersectionMetrics(jaccard_index, relative_jaccard, frac_from_intersection, output_node2['clerp'],
+                               output_node2['token_prob'])
 
 
 def get_links_overlap(graph_metadata1: dict,
-                      graph_metadata2: dict) -> tuple[dict[str, Any], tuple[ndarray, ndarray], dict[str, Any]]:
+                      graph_metadata2: dict,
+                      raise_if_no_matching_tokens: bool = True) -> tuple[
+    dict[str, Any], tuple[ndarray, ndarray], dict[str, Any]]:
     """
     Creates a nested dictionary with all target_ids at the top level, linked source_ids at the next level
     and finally link weights as the values which are represented as lists ([weight graph 1, weight graph 2]).
@@ -80,7 +94,10 @@ def get_links_overlap(graph_metadata1: dict,
     output_logit_id1 = get_id_without_pos(get_top_output_logit_node(graph_metadata1['nodes'])['node_id'])
     output_node2 = [node for node in get_output_logits(graph_metadata2['nodes']) if
                     node['node_id'].startswith(output_logit_id1)]
-    assert len(output_node2) == 1, "Output tokens don't match!"
+    if not output_node2:
+        if raise_if_no_matching_tokens:
+            assert len(output_node2) == 1, "Output tokens don't match!"
+        output_node2 = [get_top_output_logit_node(graph_metadata2['nodes'])]  # just grab top
     links1 = get_links_from_node(graph_metadata1, include_features_only=True)
     links2 = get_links_from_node(graph_metadata2,
                                  starting_node=output_node2[0] if len(output_node2) > 0 else None,
@@ -235,7 +252,7 @@ def compare_prompt_subgraphs(main_prompt: str, diff_prompts: List[str], sim_prom
     print(f"Neuronpedia Graph for Main Prompt: {graph_metadata['metadata']['info']['url']}")
 
     output_node = get_top_output_logit_node(graph_metadata["nodes"])
-    filter_layers = ['E', output_node['layer']] + [str(i) for i in range(2)]
+    filter_layers = ['E', output_node['layer']]
     features_of_interest = features_of_interest[~features_of_interest['layer'].isin(filter_layers)]
     if filter_by_act_density:
         feature_info = get_all_features(features_of_interest, model=model, submodel=submodel)
