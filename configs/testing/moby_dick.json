@@ -1,0 +1,13 @@
+{
+  "MAIN_PROMPT": "Whenever I find myself growing grim about the mouth; whenever it is a damp, drizzly November in my",
+  "DIFF_PROMPTS": [
+    "whenever it is a damp, drizzly November in my"
+  ],
+  "SIM_PROMPTS": [
+        "Whenever I find myself growing grim about the mouth; whenever it is a damp, drizzly",
+    "Whenever I find myself growing grim about the mouth; whenever it is a",
+    "Whenever I find myself growing grim about the mouth whenever it is a damp, drizzly November in my",
+    "Whenever I find myself growing grim around the mouth; whenever it is a damp, drizzly November in my",
+    "Whenever I find myself growing grim about the throat; whenever it is a damp, drizzly November in my"
+  ]
+}

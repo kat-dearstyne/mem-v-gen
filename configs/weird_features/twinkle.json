@@ -1,0 +1,10 @@
+{
+  "MAIN_PROMPT": "Twinkle twinkle little star\nHow I wonder what you",
+  "DIFF_PROMPTS": [
+    "Twinkling softly tiny star\nI keep asking what you",
+    "Shining is the little candle\nshowing clearly what you",
+    "Despite my initial confidence, I now realize I have no idea who they"
+  ],
+  "SIM_PROMPTS": [
+  ]
+}

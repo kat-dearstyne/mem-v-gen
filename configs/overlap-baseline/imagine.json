@@ -1,0 +1,10 @@
+{
+  "MAIN_PROMPT": "Shadows thin in rising light\nVoices call for something more\nEvery mouth reveals the craving\nAn intense pang of",
+  "DIFF_PROMPTS": [
+    "Shadows thin in rising light\nVoices call for something more\nEvery mouth reveals the",
+        "Shadows thin in rising light\nVoices call for"
+  ],
+  "SIM_PROMPTS": [
+  ],
+  "TASK": "combined"
+}

@@ -1,7 +1,7 @@
 {
-  "MAIN_PROMPT": "Shining is the little candle, showing clearly what you",
+  "MAIN_PROMPT": "Shining is the little candle\nshowing clearly what you",
   "DIFF_PROMPTS": [
-    "Twinkling softly, tiny star, I keep asking what you",
+    "Twinkling softly tiny star\nI keep asking what you",
     "Despite my initial confidence, I now realize I have no idea who they"
   ],
   "SIM_PROMPTS": [

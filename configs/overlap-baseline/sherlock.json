@@ -1,0 +1,11 @@
+{
+  "MAIN_PROMPT": "After reviewing every false proof, the mathematician concluded the one remaining theory had to be the",
+  "DIFF_PROMPTS": [
+    "After reviewing every false proof, the mathematician concluded the one remaining",
+        "After reviewing every false proof, the mathematician"
+
+  ],
+  "SIM_PROMPTS": [
+  ],
+  "TASK": "combined"
+}

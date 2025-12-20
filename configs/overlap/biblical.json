@@ -1,0 +1,9 @@
+{
+  "MAIN_PROMPT": "Then I saw \"a new heaven and a new earth,\" for the first heaven and the first earth had passed away, and there was no longer any",
+  "DIFF_PROMPTS": [
+    "Then I saw \"a new heaven and a new earth,\" for the first heaven and the first earth had",
+    "Then I saw \"a new heaven and a new",
+  ],
+  "SIM_PROMPTS": [],
+  "TASK": "combined"
+}

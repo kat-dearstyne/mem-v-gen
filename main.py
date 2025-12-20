@@ -20,10 +20,9 @@ SUBMODEL_NUM = int(os.getenv("SUBMODEL_NUM", "0"))
 
 if __name__ == "__main__":
     if RUN_FINAL_ANALYSIS:
-        assert len(ANALYSIS_DIRS) == 2, f"Expected 2 dirs for analysis. Got {len(ANALYSIS_DIRS)}"
-        primary = Path(OUTPUT_DIR) / ANALYSIS_DIRS[0]
-        analyze_overlap(dir1=primary, dir2=Path(OUTPUT_DIR) / ANALYSIS_DIRS[1],
-                        save_dir=primary / "final")
+        assert len(ANALYSIS_DIRS) >= 2, f"Expected at least 2 dirs for analysis. Got {len(ANALYSIS_DIRS)}"
+        dirs = [Path(OUTPUT_DIR) / d.strip() for d in ANALYSIS_DIRS if d.strip()]
+        analyze_overlap(dirs=dirs, save_dir=dirs[0] / "final")
     else:
         run_for_all_configs(CONFIG_NAMES, CONFIG_DIR, RUN_ERROR_ANALYSIS,
                             submodel_num=SUBMODEL_NUM)

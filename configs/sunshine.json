@@ -1,9 +1,9 @@
 {
-  "MAIN_PROMPT": "You are my sunshine, my only sunshine. You make me happy when skies are gray. You’ll never know, dear, how much I love you; please don’t take my sunshine",
+  "MAIN_PROMPT": "You are my sunshine, my only sunshine.\nYou make me happy when skies are gray.\nYou’ll never know, dear, how much I love you;\nplease don’t take my sunshine",
   "DIFF_PROMPTS": [
-    "You are my bright light, my dearest bright light. You lift my spirits when the skies turn gray. You may not realize, love, how deeply I care for you; please don’t let that bright light go",
+    "You are my bright light, my dearest bright light.\nYou lift my spirits when the skies turn gray.\nYou may not realize, love, how deeply I care for you;\nplease don’t let that bright light go",
     "You are the river, a silver river\nYou murmur softly as you weave and sway\nI find my peace where your waters glimmer\nPlease don’t let your whisper fade",
-        "The stove was quite hot so he quickly pulled his hand"
+    "The stove was quite hot so he quickly pulled his hand"
   ],
   "SIM_PROMPTS": [
   ]

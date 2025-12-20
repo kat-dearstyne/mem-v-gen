@@ -1,0 +1,9 @@
+{
+  "MAIN_PROMPT": "And they will walk forward unafraid, hearing the quiet promise carried on the winds above the restless",
+  "DIFF_PROMPTS": [
+    "And they will walk forward unafraid, hearing the quiet promise carried on the winds",
+    "And they will walk forward unafraid, hearing the quiet"
+  ],
+  "SIM_PROMPTS": [],
+  "TASK": "combined"
+}

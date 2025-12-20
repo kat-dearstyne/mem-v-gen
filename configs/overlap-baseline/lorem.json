@@ -1,0 +1,10 @@
+{
+  "MAIN_PROMPT":  "The building now operates as a center for Fed-Ex copying and",
+  "DIFF_PROMPTS": [
+     "The building now operates as a center for",
+         "The building now operates as a"
+  ],
+  "SIM_PROMPTS": [
+  ],
+  "TASK": "combined"
+}

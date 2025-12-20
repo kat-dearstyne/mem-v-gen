@@ -1,0 +1,10 @@
+{
+  "MAIN_PROMPT": "A moment before the torch was lit, some urged for caution and some daring, it was an hour of wisdom or",
+  "DIFF_PROMPTS": [
+    "A moment before the torch was lit, some urged for caution and some daring, it was an",
+    "A moment before the torch was lit, some urged for"
+  ],
+  "SIM_PROMPTS": [
+  ],
+  "TASK": "combined"
+}

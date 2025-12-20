@@ -1,0 +1,9 @@
+{
+  "MAIN_PROMPT": "The quick brown fox jumps over the lazy",
+  "DIFF_PROMPTS": [
+    "The quick brown fox jumps over the",
+    "The quick brown"
+  ],
+  "SIM_PROMPTS": [],
+  "TASK": "combined"
+}

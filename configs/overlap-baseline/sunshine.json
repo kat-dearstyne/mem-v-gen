@@ -1,0 +1,10 @@
+{
+  "MAIN_PROMPT": "You are the river, a silver river\nYou murmur softly as you weave and sway\nI find my peace where your waters glimmer\nPlease don’t let your whisper fade",
+  "DIFF_PROMPTS": [
+"You are the river, a silver river\nYou murmur softly as you weave and sway\nI find my peace where your waters glimmer\nPlease don’t let your",
+    "You are the river, a silver river\nYou murmur softly as you weave and sway\nI find my peace where your waters"
+  ],
+  "SIM_PROMPTS": [
+  ],
+  "TASK": "combined"
+}

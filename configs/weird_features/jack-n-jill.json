@@ -1,0 +1,10 @@
+{
+  "MAIN_PROMPT": "Jack and Jill went up the hill to fetch a pail of",
+  "DIFF_PROMPTS": [
+    "Jackie and Jillian climbed the slope to retrieve a container of",
+    "Liam and Claire raced through the square to see a fountain of",
+    "Schools, gyms and swimming pools were shut because of the lack of heat and"
+  ],
+  "SIM_PROMPTS": [
+  ]
+}

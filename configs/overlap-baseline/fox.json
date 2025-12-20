@@ -1,0 +1,10 @@
+{
+  "MAIN_PROMPT":   "Tad would put a leash on the bird and walk him around the house like a",
+  "DIFF_PROMPTS": [
+      "Tad would put a leash on the bird and walk him around the",
+          "Tad would put a leash on the bird and"
+  ],
+  "SIM_PROMPTS": [
+  ],
+  "TASK": "combined"
+}

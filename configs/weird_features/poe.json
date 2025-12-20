@@ -1,0 +1,10 @@
+{
+  "MAIN_PROMPT": "Once upon a midnight dreary, while I pondered, weak and",
+  "DIFF_PROMPTS": [
+    "Late one bleak and silent night, as I sat thinking, fragile and",
+    "Beyond the silent ridge, the evening wind faltered, its long journey slow and",
+    "On the 10th nationwide day of protests, some were growing"
+  ],
+  "SIM_PROMPTS": [
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "MAIN_PROMPT": "You are my sunshine, my only sunshine.\nYou make me happy when skies are gray.\nYou\u2019ll never know, dear, how much I love you;\nplease don\u2019t take my sunshine",
+  "DIFF_PROMPTS": [
+    "You are my sunshine, my only sunshine.\nYou make me happy when skies are gray.\nYou\u2019ll never know,",
+    "You are my sunshine, my only sunshine.\nYou make me happy when skies are",
+    "You are my sunshine, my only sunshine.\nYou make me"
+  ],
+  "SIM_PROMPTS": [],
+  "TASK": "combined"
+}

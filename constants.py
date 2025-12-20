@@ -15,6 +15,8 @@ TOP_K = 4
 PROMPT_IDS_MEMORIZED = ["mem", "memorized vs rephrased", "memorized vs made-up", "memorized vs. random"]
 PROMPT_ID_BASELINE = ["made-up", "made-up vs rephrased", "made-up vs random"]
 OVERLAP_ANALYSIS_FILENAME = "overlap-metrics.csv"
+FEATURE_LAYER = "25"
+FEATURE_ID = "9031"
 
 # Custom color palette for visualizations
 COLORS = {

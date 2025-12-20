@@ -1,0 +1,9 @@
+{
+  "MAIN_PROMPT": "Jack and Jill went up the hill to fetch a pail of",
+  "DIFF_PROMPTS": [
+    "Jack and Jill went up the hill to fetch a",
+    "Jack and Jill went up the"
+  ],
+  "SIM_PROMPTS": [],
+  "TASK": "combined"
+}
