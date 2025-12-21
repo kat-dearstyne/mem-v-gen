@@ -25,26 +25,6 @@ The following metrics were computed to measure accuracy between base and replace
 
 ---
 
-## Metric Distributions
-
-### Last Token Cosine
-
-![Last Token Cosine](boxplots/last_token_cosine.png)
-
-### Cumulative Cosine
-
-![Cumulative Cosine](boxplots/cumulative_cosine.png)
-
-### Original Accuracy
-
-![Original Accuracy](boxplots/original_accuracy.png)
-
-### KL Divergence
-
-![KL Divergence](boxplots/kl_divergence.png)
-
----
-
 ## Statistical Testing
 
 **Tests used:**
@@ -70,7 +50,6 @@ The following metrics were computed to measure accuracy between base and replace
 | Original Accuracy | Yes | No | medium | small |
 | KL Divergence | Yes | Yes | large | large |
 
-![Memorized vs Made-up Effect Sizes](significance_viz/memorized_vs_made_up_effect_sizes.png)
 
 ### Memorized vs Random
 
@@ -81,9 +60,6 @@ The following metrics were computed to measure accuracy between base and replace
 | Original Accuracy | Yes | Yes | very large | medium |
 | KL Divergence | Yes | Yes | large | large |
 
-![Memorized vs Random Effect Sizes](significance_viz/memorized_vs_random_effect_sizes.png)
-
----
 
 ## Pooled Comparison
 
@@ -98,6 +74,10 @@ Compares memorized (n=15) against all other conditions combined (n=30), providin
 | Original Accuracy | Yes | Yes | large | medium |
 | KL Divergence | Yes | Yes | very large | large |
 
+![Memorized vs Made-up Effect Sizes](significance_viz/memorized_vs_made_up_effect_sizes.png)
+
+![Memorized vs Random Effect Sizes](significance_viz/memorized_vs_random_effect_sizes.png)
+
 ![Pooled Effect Sizes](significance_viz/pooled_effect_sizes.png)
 
 ---
@@ -109,4 +89,7 @@ Compares memorized (n=15) against all other conditions combined (n=30), providin
 - **Original Accuracy** shows very large effect sizes in the pooled comparison and against random, with significance on both tests.
 
 - **Cumulative Cosine** and **Last Token Cosine** show medium effect sizes; the pooled comparison achieves significance on both tests due to increased statistical power.
+
+
+![Metric Distributions](combined_metrics_boxplot.png)
 

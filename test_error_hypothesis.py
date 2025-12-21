@@ -24,7 +24,12 @@ from wordfreq import zipf_frequency
 
 from circuit_tracer.replacement_model import ReplacementModel
 from utils import get_env_bool
-from visualizations import plot_error_hypothesis_metrics, plot_token_complexity, plot_significance_effect_sizes
+from visualizations import (
+    plot_error_hypothesis_metrics,
+    plot_error_hypothesis_combined_boxplot,
+    plot_token_complexity,
+    plot_significance_effect_sizes,
+)
 
 
 # Condition names mapping to config structure:
@@ -839,9 +844,18 @@ def analyze_results(output_dir: Path = OUTPUT_DIR):
         return
 
     conditions = df["condition"].unique().tolist()
+    palette = sns.color_palette("husl", len(conditions))
 
     # Create metric visualizations (bar charts, boxplots, heatmaps)
     plot_error_hypothesis_metrics(df, output_dir, top_k=TOP_K)
+
+    # Create combined boxplot for main metrics
+    plot_error_hypothesis_combined_boxplot(
+        df,
+        conditions=conditions,
+        palette=palette,
+        save_path=output_dir / "combined_metrics_boxplot.png",
+    )
 
     # Token prediction comparison table
     token_rows = []

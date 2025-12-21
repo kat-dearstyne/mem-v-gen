@@ -971,7 +971,7 @@ def plot_error_hypothesis_boxplot(df: pd.DataFrame,
     """
     ylabel = "Score" if is_bounded else "KL Divergence (nats)"
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(5, 4))
     sns.boxplot(data=df, x="condition", y=metric, order=conditions,
                 palette=palette, ax=ax)
     sns.stripplot(data=df, x="condition", y=metric, order=conditions,
@@ -1009,6 +1009,51 @@ def plot_error_hypothesis_heatmap(df: pd.DataFrame,
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def plot_error_hypothesis_combined_boxplot(df: pd.DataFrame,
+                                            conditions: List[str],
+                                            palette: List,
+                                            save_path: Path,
+                                            metrics: Optional[List[str]] = None,
+                                            titles: Optional[List[str]] = None) -> None:
+    """
+    Creates a single figure with boxplots for multiple metrics.
+
+    Args:
+        df: DataFrame with columns: condition and metric columns
+        conditions: List of condition names
+        palette: Color palette for conditions
+        save_path: Path to save the figure
+        metrics: List of metric column names (default: 4 main metrics)
+        titles: List of titles for each subplot (default: formatted metric names)
+    """
+    if metrics is None:
+        metrics = ["last_token_cosine", "cumulative_cosine", "original_accuracy", "kl_divergence"]
+    if titles is None:
+        titles = ["Last Token Cosine", "Cumulative Cosine", "Original Accuracy", "KL Divergence"]
+
+    n_metrics = len(metrics)
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    axes = axes.flatten()
+
+    for i, (metric, title) in enumerate(zip(metrics, titles)):
+        ax = axes[i]
+        is_bounded = metric != "kl_divergence"
+        ylabel = "Score" if is_bounded else "KL Divergence (nats)"
+
+        sns.boxplot(data=df, x="condition", y=metric, order=conditions,
+                    palette=palette, ax=ax)
+        sns.stripplot(data=df, x="condition", y=metric, order=conditions,
+                      color='black', alpha=0.5, size=3, ax=ax)
+        ax.set_title(title, fontweight='bold', fontsize=11)
+        ax.set_xlabel("")
+        ax.set_ylabel(ylabel, fontsize=9)
+        ax.set_xticklabels(conditions, rotation=45, ha='right', fontsize=9)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close()
 
 
