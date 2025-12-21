@@ -40,6 +40,7 @@ AccuracyMetrics = namedtuple("AccuracyMetrics", [
     "replacement_top_token",
 ])
 
+IS_TEST = False
 
 def get_replacement_logits(model, prompt_tokens):
     """
@@ -154,6 +155,8 @@ def load_model():
     hf_token = os.environ.get("HF_TOKEN")
     if hf_token:
         login(hf_token)
+    if IS_TEST:
+        return None
 
     model = ReplacementModel.from_pretrained(
         "google/gemma-2-2b",
@@ -174,21 +177,29 @@ def run_accuracy_test(model, prompt_str: str) -> AccuracyMetrics:
     Returns:
         AccuracyMetrics namedtuple with all accuracy measurements
     """
-    prompt_tokens = model.ensure_tokenized(prompt_str)
+    if IS_TEST:
+        # Dummy tensors for testing without model
+        prompt_tokens = torch.zeros((1, 10), dtype=torch.long)
+        base_logits_BPV = torch.randn((1, 10, 256000), dtype=torch.bfloat16)
+        replacement_logits_BPV = torch.randn((1, 10, 256000), dtype=torch.bfloat16)
+        original_top_token = "<test>"
+        replacement_top_token = "<test>"
+    else:
+        prompt_tokens = model.ensure_tokenized(prompt_str)
 
-    with torch.no_grad():
-        base_logits_BPV = model(prompt_tokens, return_type='logits')
-        replacement_logits_BPV = get_replacement_logits(model, prompt_tokens)
+        with torch.no_grad():
+            base_logits_BPV = model(prompt_tokens, return_type='logits')
+            replacement_logits_BPV = get_replacement_logits(model, prompt_tokens)
+
+        # Get top token predictions at final position for qualitative comparison
+        original_top_token_id = base_logits_BPV[0, -1].argmax().item()
+        replacement_top_token_id = replacement_logits_BPV[0, -1].argmax().item()
+        original_top_token = model.tokenizer.decode([original_top_token_id])
+        replacement_top_token = model.tokenizer.decode([replacement_top_token_id])
 
     last_token_acc = get_last_token_accuracy(base_logits_BPV, replacement_logits_BPV)
     cumulative_acc = get_cumulative_token_accuracy(base_logits_BPV, replacement_logits_BPV)
     orig_acc = get_original_accuracy_metric(base_logits_BPV, replacement_logits_BPV, prompt_tokens)
-
-    # Get top token predictions at final position for qualitative comparison
-    original_top_token_id = base_logits_BPV[0, -1].argmax().item()
-    replacement_top_token_id = replacement_logits_BPV[0, -1].argmax().item()
-    original_top_token = model.tokenizer.decode([original_top_token_id])
-    replacement_top_token = model.tokenizer.decode([replacement_top_token_id])
 
     return AccuracyMetrics(
         last_token_cosine=last_token_acc,
