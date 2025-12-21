@@ -1,7 +1,5 @@
 # Error Hypothesis Analysis Summary
 
-This analysis compares base model logits with replacement model logits (using transcoder-reconstructed MLP activations) across three conditions: memorized, made-up, and random.
-
 ---
 
 ## Token Complexity Analysis
@@ -16,7 +14,7 @@ This analysis compares base model logits with replacement model logits (using tr
 
 ## Metrics Analyzed
 
-The following metrics were computed to measure fidelity between base and replacement model outputs:
+The following metrics were computed to measure accuracy between base and replacement model outputs:
 
 | Metric | Description |
 |--------|-------------|
@@ -104,7 +102,7 @@ Compares memorized (n=15) against all other conditions combined (n=30), providin
 
 ---
 
-## Key Findings
+## Results
 
 - **KL Divergence** shows the strongest and most consistent effect, with large effect sizes and significance on both tests across all comparisons.
 
@@ -112,4 +110,3 @@ Compares memorized (n=15) against all other conditions combined (n=30), providin
 
 - **Cumulative Cosine** and **Last Token Cosine** show medium effect sizes; the pooled comparison achieves significance on both tests due to increased statistical power.
 
-- The memorized condition consistently shows lower fidelity between base and replacement models compared to made-up and random conditions.
