@@ -12,7 +12,6 @@ from functools import partial
 from pathlib import Path
 from typing import Optional
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -20,8 +19,12 @@ import torch
 import transformer_lens as tl
 from dotenv import load_dotenv
 from huggingface_hub import login
+from scipy import stats
+from wordfreq import zipf_frequency
 
 from circuit_tracer.replacement_model import ReplacementModel
+from utils import get_env_bool
+from visualizations import plot_error_hypothesis_metrics, plot_token_complexity, plot_significance_effect_sizes
 
 
 # Condition names mapping to config structure:
@@ -50,8 +53,9 @@ AccuracyMetrics = namedtuple("AccuracyMetrics", [
 
 TOP_K = 10  # For top-k agreement metric
 
-IS_TEST = os.getenv("IS_TEST", "false").lower() == "true"
-ANALYZE_RESULTS = os.getenv("ANALYZE_RESULTS", "false").lower() == "true"
+IS_TEST = get_env_bool("IS_TEST", False)
+ANALYZE_RESULTS = get_env_bool("ANALYZE_RESULTS", False)
+RUN_SANITY_CHECK = get_env_bool("RUN_SANITY_CHECK", False)
 
 def get_replacement_logits(model, prompt_tokens):
     """
@@ -398,6 +402,418 @@ def load_results(output_dir: Path = OUTPUT_DIR) -> dict:
         return json.load(f)
 
 
+def get_token_complexity(token: str) -> dict:
+    """
+    Get complexity metrics for a token.
+
+    Args:
+        token: The token string (may include leading space from tokenizer)
+
+    Returns:
+        Dictionary with zipf_frequency and token_length
+    """
+    # Clean token (remove leading/trailing whitespace for frequency lookup)
+    clean_token = token.strip()
+
+    # Zipf frequency (scale ~0-8, higher = more common)
+    # Returns 0 for unknown words
+    freq = zipf_frequency(clean_token, 'en') if clean_token else 0.0
+
+    return {
+        "zipf_frequency": freq,
+        "token_length": len(clean_token),
+    }
+
+
+HIGHER_IS_BETTER_METRICS = ["last_token_cosine", "cumulative_cosine", "original_accuracy",
+                            "top_k_agreement", "replacement_prob_of_original_top"]
+LOWER_IS_BETTER_METRICS = ["kl_divergence"]
+ALL_METRICS = HIGHER_IS_BETTER_METRICS + LOWER_IS_BETTER_METRICS
+
+
+def compute_pooled_significance(
+    df: pd.DataFrame,
+    target_condition: str,
+    other_conditions: list,
+    test_target_worse: bool = True,
+) -> pd.DataFrame:
+    """
+    Compute significance comparing target condition against ALL other conditions pooled.
+
+    Args:
+        df: DataFrame with columns: condition and metric columns
+        target_condition: The condition to compare against pooled others
+        other_conditions: List of conditions to pool together
+        test_target_worse: If True, test if target performs worse (lower similarity, higher KL).
+                          If False, test if target performs better.
+
+    Returns:
+        DataFrame with significance results (one row per metric)
+    """
+    available_conditions = df["condition"].unique().tolist()
+    if target_condition not in available_conditions:
+        return pd.DataFrame()
+
+    other_conditions = [c for c in other_conditions if c in available_conditions]
+    if not other_conditions:
+        return pd.DataFrame()
+
+    target_data = df[df["condition"] == target_condition]
+    pooled_data = df[df["condition"].isin(other_conditions)]
+
+    results_rows = []
+
+    for metric in ALL_METRICS:
+        target_values = target_data[metric].values
+        pooled_values = pooled_data[metric].values
+        is_higher_better = metric in HIGHER_IS_BETTER_METRICS
+
+        # Determine test direction
+        if test_target_worse:
+            alternative = 'less' if is_higher_better else 'greater'
+        else:
+            alternative = 'greater' if is_higher_better else 'less'
+
+        # Mann-Whitney U test (non-parametric)
+        mw_stat, mw_p = stats.mannwhitneyu(target_values, pooled_values, alternative=alternative)
+
+        # T-test (parametric)
+        t_stat, t_p = stats.ttest_ind(target_values, pooled_values, alternative=alternative)
+
+        # Effect size: Cohen's d
+        pooled_std = np.sqrt(((len(target_values)-1)*target_values.std()**2 +
+                              (len(pooled_values)-1)*pooled_values.std()**2) /
+                             (len(target_values) + len(pooled_values) - 2))
+        cohens_d = (target_values.mean() - pooled_values.mean()) / pooled_std if pooled_std > 0 else 0
+
+        # Effect size: rank-biserial correlation (for Mann-Whitney)
+        n1, n2 = len(target_values), len(pooled_values)
+        rank_biserial = 1 - (2 * mw_stat) / (n1 * n2)
+
+        results_rows.append({
+            "metric": metric,
+            "comparison": f"{target_condition} vs pooled({'+'.join(other_conditions)})",
+            "target_condition": target_condition,
+            "other_conditions": "+".join(other_conditions),
+            "test_direction": "target_worse" if test_target_worse else "target_better",
+            "target_mean": target_values.mean(),
+            "target_std": target_values.std(),
+            "pooled_mean": pooled_values.mean(),
+            "pooled_std": pooled_values.std(),
+            "n_target": n1,
+            "n_pooled": n2,
+            "t_statistic": t_stat,
+            "t_p_value": t_p,
+            "t_significant": t_p < 0.05,
+            "mann_whitney_u": mw_stat,
+            "mw_p_value": mw_p,
+            "mw_significant": mw_p < 0.05,
+            "cohens_d": cohens_d,
+            "rank_biserial_r": rank_biserial,
+        })
+
+    return pd.DataFrame(results_rows)
+
+
+def compute_pairwise_significance(
+    df: pd.DataFrame,
+    target_condition: str,
+    other_conditions: list,
+    test_target_worse: bool = True,
+) -> pd.DataFrame:
+    """
+    Core function to compute pairwise significance between conditions.
+
+    Args:
+        df: DataFrame with columns: condition and metric columns
+        target_condition: The condition to compare against others
+        other_conditions: List of conditions to compare target against
+        test_target_worse: If True, test if target performs worse (lower similarity, higher KL).
+                          If False, test if target performs better.
+
+    Returns:
+        DataFrame with significance results
+    """
+    available_conditions = df["condition"].unique().tolist()
+    if target_condition not in available_conditions:
+        return pd.DataFrame()
+
+    other_conditions = [c for c in other_conditions if c in available_conditions]
+    if not other_conditions:
+        return pd.DataFrame()
+
+    target_data = df[df["condition"] == target_condition]
+    results_rows = []
+
+    for metric in ALL_METRICS:
+        target_values = target_data[metric].values
+        is_higher_better = metric in HIGHER_IS_BETTER_METRICS
+
+        for other_cond in other_conditions:
+            other_values = df[df["condition"] == other_cond][metric].values
+
+            # Determine test direction
+            # test_target_worse=True: for higher_is_better metrics, test target < other (alternative='less')
+            # test_target_worse=False: for higher_is_better metrics, test target > other (alternative='greater')
+            if test_target_worse:
+                alternative = 'less' if is_higher_better else 'greater'
+            else:
+                alternative = 'greater' if is_higher_better else 'less'
+
+            # Mann-Whitney U test (non-parametric)
+            mw_stat, mw_p = stats.mannwhitneyu(target_values, other_values, alternative=alternative)
+
+            # T-test (parametric)
+            t_stat, t_p = stats.ttest_ind(target_values, other_values, alternative=alternative)
+
+            # Effect size: Cohen's d
+            pooled_std = np.sqrt(((len(target_values)-1)*target_values.std()**2 +
+                                  (len(other_values)-1)*other_values.std()**2) /
+                                 (len(target_values) + len(other_values) - 2))
+            cohens_d = (target_values.mean() - other_values.mean()) / pooled_std if pooled_std > 0 else 0
+
+            # Effect size: rank-biserial correlation (for Mann-Whitney)
+            n1, n2 = len(target_values), len(other_values)
+            rank_biserial = 1 - (2 * mw_stat) / (n1 * n2)
+
+            results_rows.append({
+                "metric": metric,
+                "comparison": f"{target_condition} vs {other_cond}",
+                "target_condition": target_condition,
+                "other_condition": other_cond,
+                "test_direction": "target_worse" if test_target_worse else "target_better",
+                "target_mean": target_values.mean(),
+                "target_std": target_values.std(),
+                "other_mean": other_values.mean(),
+                "other_std": other_values.std(),
+                "n_per_group": n1,
+                "t_statistic": t_stat,
+                "t_p_value": t_p,
+                "t_significant": t_p < 0.05,
+                "mann_whitney_u": mw_stat,
+                "mw_p_value": mw_p,
+                "mw_significant": mw_p < 0.05,
+                "cohens_d": cohens_d,
+                "rank_biserial_r": rank_biserial,
+            })
+
+    return pd.DataFrame(results_rows)
+
+
+def print_significant_results(results_df: pd.DataFrame, label: str):
+    """
+    Print significant results from a significance analysis DataFrame.
+
+    Args:
+        results_df: DataFrame with t_significant, mw_significant, metric, comparison columns
+        label: Label to identify the type of analysis (e.g., "Pairwise", "Pooled")
+    """
+    if results_df.empty:
+        print(f"{label}: No results")
+        return
+
+    t_significant = results_df[results_df["t_significant"] == True][["metric", "comparison"]]
+    mw_significant = results_df[results_df["mw_significant"] == True][["metric", "comparison"]]
+    print(f"{label} T-Test Significant Results: ", t_significant)
+    print(f"{label} Mann Whitney Significant Results: ", mw_significant)
+
+
+def analyze_metric_significance(df: pd.DataFrame, output_dir: Path) -> tuple:
+    """
+    Analyze statistical significance of metrics comparing memorized vs other conditions.
+
+    Tests whether memorized condition performs worse than other conditions.
+    Saves pairwise results to significance_analysis.csv and pooled results to
+    pooled_significance_analysis.csv.
+
+    Args:
+        df: DataFrame with columns: condition and metric columns
+        output_dir: Directory to save results CSV
+
+    Returns:
+        Tuple of (pairwise_results_df, pooled_results_df)
+    """
+    conditions = df["condition"].unique().tolist()
+    other_conditions = [c for c in conditions if c != "memorized"]
+
+    # Pairwise comparisons (memorized vs each other condition separately)
+    pairwise_df = compute_pairwise_significance(
+        df,
+        target_condition="memorized",
+        other_conditions=other_conditions,
+        test_target_worse=True,
+    )
+
+    if not pairwise_df.empty:
+        pairwise_df.to_csv(output_dir / "significance_analysis.csv", index=False)
+
+    # Pooled comparison (memorized vs all other conditions combined)
+    pooled_df = compute_pooled_significance(
+        df,
+        target_condition="memorized",
+        other_conditions=other_conditions,
+        test_target_worse=True,
+    )
+
+    if not pooled_df.empty:
+        pooled_df.to_csv(output_dir / "pooled_significance_analysis.csv", index=False)
+
+    return pairwise_df, pooled_df
+
+
+def sanity_check_significance(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
+    """
+    Run sanity check significance tests to verify results.
+
+    Tests:
+    1. Memorized vs others with FLIPPED direction (testing if memorized is better)
+    2. Made-up vs random (testing if non-memorized conditions differ)
+
+    These should generally NOT be significant if the main results are valid.
+
+    Args:
+        df: DataFrame with columns: condition and metric columns
+        output_dir: Directory to save results CSV
+    """
+    conditions = df["condition"].unique().tolist()
+    all_results = []
+
+    # Test 1: Memorized performing BETTER (should NOT be significant)
+    other_conditions = [c for c in conditions if c != "memorized"]
+    flipped_results = compute_pairwise_significance(
+        df,
+        target_condition="memorized",
+        other_conditions=other_conditions,
+        test_target_worse=False,  # Flipped direction
+    )
+    if not flipped_results.empty:
+        flipped_results["sanity_check"] = "memorized_better (flipped)"
+        all_results.append(flipped_results)
+
+    # Test 2: Made-up vs random (should NOT be significant)
+    if "made-up" in conditions and "random" in conditions:
+        madeup_vs_random = compute_pairwise_significance(
+            df,
+            target_condition="made-up",
+            other_conditions=["random"],
+            test_target_worse=True,
+        )
+        if not madeup_vs_random.empty:
+            madeup_vs_random["sanity_check"] = "made-up_worse_than_random"
+            all_results.append(madeup_vs_random)
+
+        random_vs_madeup = compute_pairwise_significance(
+            df,
+            target_condition="random",
+            other_conditions=["made-up"],
+            test_target_worse=True,
+        )
+        if not random_vs_madeup.empty:
+            random_vs_madeup["sanity_check"] = "random_worse_than_made-up"
+            all_results.append(random_vs_madeup)
+
+    if all_results:
+        results_df = pd.concat(all_results, ignore_index=True)
+        sanity_dir = output_dir / "sanity_checks"
+        sanity_dir.mkdir(parents=True, exist_ok=True)
+        results_df.to_csv(sanity_dir / "sanity_check_significance.csv", index=False)
+        return results_df
+
+    return pd.DataFrame()
+
+
+def analyze_token_complexity(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
+    """
+    Analyze token complexity across conditions to check for confounds.
+
+    Adds complexity metrics to df, creates visualizations, runs statistical tests,
+    and saves results to CSV.
+
+    Args:
+        df: DataFrame with columns: condition, config, original_top_token
+        output_dir: Directory to save visualizations and CSV
+    """
+    # Add token complexity metrics
+    df["zipf_frequency"] = df["original_top_token"].apply(
+        lambda t: get_token_complexity(t)["zipf_frequency"]
+    )
+    df["token_length"] = df["original_top_token"].apply(
+        lambda t: get_token_complexity(t)["token_length"]
+    )
+
+    conditions = df["condition"].unique().tolist()
+    palette = sns.color_palette("husl", len(conditions))
+
+    # Create visualizations
+    plot_token_complexity(df, output_dir, conditions, palette)
+
+    # Statistical tests - pairwise comparisons like metric significance
+    complexity_metrics = ["zipf_frequency", "token_length"]
+    results_rows = []
+
+    if "memorized" not in conditions:
+        return pd.DataFrame()
+
+    other_conditions = [c for c in conditions if c != "memorized"]
+    if not other_conditions:
+        return pd.DataFrame()
+
+    memorized_data = df[df["condition"] == "memorized"]
+
+    for metric in complexity_metrics:
+        mem_values = memorized_data[metric].values
+
+        for other_cond in other_conditions:
+            other_values = df[df["condition"] == other_cond][metric].values
+
+            # T-test (two-tailed - just checking for difference, not direction)
+            t_stat, t_p = stats.ttest_ind(mem_values, other_values)
+
+            # Mann-Whitney U test (two-tailed)
+            mw_stat, mw_p = stats.mannwhitneyu(mem_values, other_values, alternative='two-sided')
+
+            # Effect size: Cohen's d
+            pooled_std = np.sqrt(((len(mem_values)-1)*mem_values.std()**2 +
+                                  (len(other_values)-1)*other_values.std()**2) /
+                                 (len(mem_values) + len(other_values) - 2))
+            cohens_d = (mem_values.mean() - other_values.mean()) / pooled_std if pooled_std > 0 else 0
+
+            # Effect size: rank-biserial correlation
+            n1, n2 = len(mem_values), len(other_values)
+            rank_biserial = 1 - (2 * mw_stat) / (n1 * n2)
+
+            results_rows.append({
+                "metric": metric,
+                "comparison": f"memorized vs {other_cond}",
+                "memorized_mean": mem_values.mean(),
+                "memorized_std": mem_values.std(),
+                "other_mean": other_values.mean(),
+                "other_std": other_values.std(),
+                "n_per_group": n1,
+                "t_statistic": t_stat,
+                "t_p_value": t_p,
+                "t_significant": t_p < 0.05,
+                "mann_whitney_u": mw_stat,
+                "mw_p_value": mw_p,
+                "mw_significant": mw_p < 0.05,
+                "cohens_d": cohens_d,
+                "rank_biserial_r": rank_biserial,
+            })
+
+    # Save complexity data
+    complexity_dir = output_dir / "token_complexity"
+    complexity_dir.mkdir(parents=True, exist_ok=True)
+
+    complexity_df = df[["condition", "config", "original_top_token", "zipf_frequency", "token_length"]]
+    complexity_df.to_csv(complexity_dir / "token_complexity.csv", index=False)
+
+    results_df = pd.DataFrame(results_rows)
+    if not results_df.empty:
+        results_df.to_csv(complexity_dir / "complexity_significance.csv", index=False)
+
+    return results_df
+
+
 def analyze_results(output_dir: Path = OUTPUT_DIR):
     """
     Load results and create visualizations comparing conditions.
@@ -423,102 +839,11 @@ def analyze_results(output_dir: Path = OUTPUT_DIR):
         return
 
     conditions = df["condition"].unique().tolist()
-    palette = sns.color_palette("husl", len(conditions))
 
-    # Metrics bounded 0-1
-    bounded_metrics = ["last_token_cosine", "cumulative_cosine", "original_accuracy",
-                       "top_k_agreement", "replacement_prob_of_original_top"]
-    bounded_titles = ["Last Token Cosine", "Cumulative Cosine", "Original Accuracy",
-                      f"Top-{TOP_K} Agreement", "Replacement P(Original Top)"]
+    # Create metric visualizations (bar charts, boxplots, heatmaps)
+    plot_error_hypothesis_metrics(df, output_dir, top_k=TOP_K)
 
-    # 1. Bar chart: Average metrics by condition (bounded metrics)
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    axes = axes.flatten()
-
-    for i, (metric, title) in enumerate(zip(bounded_metrics, bounded_titles)):
-        ax = axes[i]
-        means = df.groupby("condition")[metric].mean().reindex(conditions)
-        stds = df.groupby("condition")[metric].std().reindex(conditions)
-
-        ax.bar(range(len(conditions)), means.values, color=palette, alpha=0.8)
-        ax.errorbar(range(len(conditions)), means.values, yerr=stds.values,
-                    fmt='none', color='black', capsize=5)
-
-        ax.set_title(title, fontweight='bold')
-        ax.set_xlabel("Condition")
-        ax.set_ylabel("Score")
-        ax.set_xticks(range(len(conditions)))
-        ax.set_xticklabels(conditions, rotation=45, ha='right')
-        ax.set_ylim(0, 1.05)
-
-    # KL divergence (unbounded, separate scale)
-    ax = axes[5]
-    means = df.groupby("condition")["kl_divergence"].mean().reindex(conditions)
-    stds = df.groupby("condition")["kl_divergence"].std().reindex(conditions)
-    ax.bar(range(len(conditions)), means.values, color=palette, alpha=0.8)
-    ax.errorbar(range(len(conditions)), means.values, yerr=stds.values,
-                fmt='none', color='black', capsize=5)
-    ax.set_title("KL Divergence", fontweight='bold')
-    ax.set_xlabel("Condition")
-    ax.set_ylabel("KL Divergence (nats)")
-    ax.set_xticks(range(len(conditions)))
-    ax.set_xticklabels(conditions, rotation=45, ha='right')
-
-    plt.tight_layout()
-    plt.savefig(output_dir / "metrics_by_condition.png", dpi=150, bbox_inches='tight')
-    plt.close()
-
-    # 2. Boxplot: Distribution of metrics by condition
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    axes = axes.flatten()
-
-    for i, (metric, title) in enumerate(zip(bounded_metrics, bounded_titles)):
-        ax = axes[i]
-        sns.boxplot(data=df, x="condition", y=metric, order=conditions,
-                    palette=palette, ax=ax)
-        sns.stripplot(data=df, x="condition", y=metric, order=conditions,
-                      color='black', alpha=0.5, size=4, ax=ax)
-        ax.set_title(title, fontweight='bold')
-        ax.set_xlabel("Condition")
-        ax.set_ylabel("Score")
-        ax.set_xticklabels(conditions, rotation=45, ha='right')
-
-    ax = axes[5]
-    sns.boxplot(data=df, x="condition", y="kl_divergence", order=conditions,
-                palette=palette, ax=ax)
-    sns.stripplot(data=df, x="condition", y="kl_divergence", order=conditions,
-                  color='black', alpha=0.5, size=4, ax=ax)
-    ax.set_title("KL Divergence", fontweight='bold')
-    ax.set_xlabel("Condition")
-    ax.set_ylabel("KL Divergence (nats)")
-    ax.set_xticklabels(conditions, rotation=45, ha='right')
-
-    plt.tight_layout()
-    plt.savefig(output_dir / "metrics_boxplot.png", dpi=150, bbox_inches='tight')
-    plt.close()
-
-    # 3. Heatmap: Metrics by config and condition
-    all_metrics = bounded_metrics + ["kl_divergence"]
-    all_titles = bounded_titles + ["KL Divergence"]
-    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-    axes = axes.flatten()
-
-    for i, (metric, title) in enumerate(zip(all_metrics, all_titles)):
-        ax = axes[i]
-        pivot = df.pivot(index="config", columns="condition", values=metric)
-        pivot = pivot[conditions]  # Reorder columns
-        vmin, vmax = (0, 1) if metric != "kl_divergence" else (None, None)
-        sns.heatmap(pivot, annot=True, fmt=".3f", cmap="YlOrRd",
-                    vmin=vmin, vmax=vmax, ax=ax, cbar_kws={'label': 'Score'})
-        ax.set_title(title, fontweight='bold')
-        ax.set_xlabel("Condition")
-        ax.set_ylabel("Config")
-
-    plt.tight_layout()
-    plt.savefig(output_dir / "metrics_heatmap.png", dpi=150, bbox_inches='tight')
-    plt.close()
-
-    # 4. Token prediction comparison table
+    # Token prediction comparison table
     token_rows = []
     for condition, config_metrics in results.items():
         for config_name, metrics in config_metrics.items():
@@ -530,18 +855,92 @@ def analyze_results(output_dir: Path = OUTPUT_DIR):
                 "match": metrics["original_top_token"] == metrics["replacement_top_token"]
             })
     token_df = pd.DataFrame(token_rows)
-
-    # Save token comparison as CSV
     token_df.to_csv(output_dir / "token_predictions.csv", index=False)
 
-    # Summary: match rate by condition
-    match_rate = token_df.groupby("condition")["match"].mean()
-    print("\nToken Prediction Match Rate by Condition:")
-    for condition in conditions:
-        if condition in match_rate.index:
-            print(f"  {condition}: {match_rate[condition]:.2%}")
+    # Statistical significance analysis
+    pairwise_df, pooled_df = analyze_metric_significance(df, output_dir)
+    print_significant_results(pairwise_df, "Pairwise")
+    print_significant_results(pooled_df, "Pooled")
 
-    print(f"\nVisualizations saved to: {output_dir}")
+    # Significance effect size visualizations
+    exclude_metrics = ["top_k_agreement", "replacement_prob_of_original_top"]
+    sig_viz_dir = output_dir / "significance_viz"
+    sig_viz_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pooled visualization
+    if not pooled_df.empty:
+        plot_significance_effect_sizes(
+            pooled_df,
+            title="Memorized vs Pooled (Made-up + Random)",
+            save_path=sig_viz_dir / "pooled_effect_sizes.png",
+            exclude_metrics=exclude_metrics,
+        )
+
+    # Pairwise visualizations (separate file for each comparison)
+    if not pairwise_df.empty:
+        for comparison in pairwise_df["comparison"].unique():
+            comparison_df = pairwise_df[pairwise_df["comparison"] == comparison]
+            # Create filename-safe version of comparison name
+            safe_name = comparison.replace(" ", "_").replace("-", "_")
+            plot_significance_effect_sizes(
+                comparison_df,
+                title=comparison.replace("_", " ").title(),
+                save_path=sig_viz_dir / f"{safe_name}_effect_sizes.png",
+                exclude_metrics=exclude_metrics,
+            )
+
+    # Token complexity analysis
+    analyze_token_complexity(df, output_dir)
+
+    print(f"\nResults saved to: {output_dir}")
+
+
+def run_sanity_checks(output_dir: Path = OUTPUT_DIR):
+    """
+    Run sanity check significance tests on existing results.
+
+    Loads results and runs tests that should NOT be significant:
+    1. Memorized performing better than other conditions (flipped direction)
+    2. Made-up vs random comparisons
+
+    Args:
+        output_dir: Directory containing results
+    """
+    results = load_results(output_dir)
+
+    # Convert to DataFrame
+    rows = []
+    for condition, config_metrics in results.items():
+        for config_name, metrics in config_metrics.items():
+            rows.append({
+                "condition": condition,
+                "config": config_name,
+                **metrics
+            })
+    df = pd.DataFrame(rows)
+
+    if df.empty:
+        print("No results to analyze")
+        return
+
+    sanity_df = sanity_check_significance(df, output_dir)
+
+    if sanity_df.empty:
+        print("No sanity check results generated")
+        return
+
+    # Report any unexpected significant results
+    sanity_sig = sanity_df[
+        (sanity_df["t_significant"]) | (sanity_df["mw_significant"])
+    ][["sanity_check", "metric", "comparison", "t_p_value", "mw_p_value"]]
+
+    if not sanity_sig.empty:
+        print("\nSanity Check - Unexpected Significant Results:")
+        print(sanity_sig.to_string(index=False))
+    else:
+        print("\nSanity Check: No unexpected significant results (good)")
+
+    print(f"\nSanity check results saved to: {output_dir / 'sanity_checks'}")
 
 
 def main():
@@ -559,7 +958,9 @@ def main():
 
 
 if __name__ == "__main__":
-    if ANALYZE_RESULTS:
+    if RUN_SANITY_CHECK:
+        run_sanity_checks()
+    elif ANALYZE_RESULTS:
         analyze_results()
     else:
         main()

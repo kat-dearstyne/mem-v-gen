@@ -924,3 +924,317 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
         plt.close()
     else:
         plt.show()
+
+
+def plot_error_hypothesis_bar_chart(df: pd.DataFrame,
+                                     metric: str,
+                                     title: str,
+                                     conditions: List[str],
+                                     palette: List,
+                                     save_path: Path,
+                                     is_bounded: bool = True) -> None:
+    """
+    Creates a bar chart with error bars for a metric across conditions.
+    """
+    ylabel = "Score" if is_bounded else "KL Divergence (nats)"
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    means = df.groupby("condition")[metric].mean().reindex(conditions)
+    stds = df.groupby("condition")[metric].std().reindex(conditions)
+
+    ax.bar(range(len(conditions)), means.values, color=palette, alpha=0.8)
+    ax.errorbar(range(len(conditions)), means.values, yerr=stds.values,
+                fmt='none', color='black', capsize=5)
+
+    ax.set_title(title, fontweight='bold')
+    ax.set_xlabel("Condition")
+    ax.set_ylabel(ylabel)
+    ax.set_xticks(range(len(conditions)))
+    ax.set_xticklabels(conditions, rotation=45, ha='right')
+    if is_bounded:
+        ax.set_ylim(0, 1.05)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def plot_error_hypothesis_boxplot(df: pd.DataFrame,
+                                   metric: str,
+                                   title: str,
+                                   conditions: List[str],
+                                   palette: List,
+                                   save_path: Path,
+                                   is_bounded: bool = True) -> None:
+    """
+    Creates a boxplot with stripplot overlay for a metric across conditions.
+    """
+    ylabel = "Score" if is_bounded else "KL Divergence (nats)"
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    sns.boxplot(data=df, x="condition", y=metric, order=conditions,
+                palette=palette, ax=ax)
+    sns.stripplot(data=df, x="condition", y=metric, order=conditions,
+                  color='black', alpha=0.5, size=4, ax=ax)
+    ax.set_title(title, fontweight='bold')
+    ax.set_xlabel("Condition")
+    ax.set_ylabel(ylabel)
+    ax.set_xticklabels(conditions, rotation=45, ha='right')
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def plot_error_hypothesis_heatmap(df: pd.DataFrame,
+                                   metric: str,
+                                   title: str,
+                                   conditions: List[str],
+                                   save_path: Path,
+                                   is_bounded: bool = True) -> None:
+    """
+    Creates a heatmap of metric values across configs and conditions.
+    """
+    ylabel = "Score" if is_bounded else "KL Divergence (nats)"
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    pivot = df.pivot(index="config", columns="condition", values=metric)
+    pivot = pivot[conditions]  # Reorder columns
+    vmin, vmax = (0, 1) if is_bounded else (None, None)
+    sns.heatmap(pivot, annot=True, fmt=".3f", cmap="YlOrRd",
+                vmin=vmin, vmax=vmax, ax=ax, cbar_kws={'label': ylabel})
+    ax.set_title(title, fontweight='bold')
+    ax.set_xlabel("Condition")
+    ax.set_ylabel("Config")
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def plot_error_hypothesis_metrics(df: pd.DataFrame,
+                                   output_dir: Path,
+                                   top_k: int = 10) -> None:
+    """
+    Creates all visualizations for error hypothesis analysis.
+
+    Args:
+        df: DataFrame with columns: condition, config, and metric columns
+        output_dir: Directory to save visualizations
+        top_k: Number for top-k agreement metric label
+    """
+    conditions = df["condition"].unique().tolist()
+    palette = sns.color_palette("husl", len(conditions))
+
+    # All metrics with their display titles
+    all_metrics = ["last_token_cosine", "cumulative_cosine", "original_accuracy",
+                   "top_k_agreement", "replacement_prob_of_original_top", "kl_divergence"]
+    all_titles = ["Last Token Cosine", "Cumulative Cosine", "Original Accuracy",
+                  f"Top-{top_k} Agreement", "Replacement P(Original Top)", "KL Divergence"]
+
+    # Create directories for each plot type
+    bar_dir = output_dir / "bar_charts"
+    boxplot_dir = output_dir / "boxplots"
+    heatmap_dir = output_dir / "heatmaps"
+    bar_dir.mkdir(parents=True, exist_ok=True)
+    boxplot_dir.mkdir(parents=True, exist_ok=True)
+    heatmap_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate individual plots for each metric
+    for metric, title in zip(all_metrics, all_titles):
+        is_bounded = metric != "kl_divergence"
+
+        plot_error_hypothesis_bar_chart(
+            df, metric, title, conditions, palette,
+            bar_dir / f"{metric}.png", is_bounded
+        )
+        plot_error_hypothesis_boxplot(
+            df, metric, title, conditions, palette,
+            boxplot_dir / f"{metric}.png", is_bounded
+        )
+        plot_error_hypothesis_heatmap(
+            df, metric, title, conditions,
+            heatmap_dir / f"{metric}.png", is_bounded
+        )
+
+
+def plot_significance_effect_sizes(df: pd.DataFrame,
+                                    title: str,
+                                    save_path: Path,
+                                    exclude_metrics: Optional[List[str]] = None) -> None:
+    """
+    Creates a visualization showing significance and effect sizes for metrics.
+
+    Displays a horizontal bar chart with Cohen's d effect sizes, with significance
+    indicated by bar color and asterisks.
+
+    Args:
+        df: DataFrame with columns: metric, t_significant, mw_significant, cohens_d, rank_biserial_r
+        title: Title for the plot
+        save_path: Path to save the visualization
+        exclude_metrics: List of metrics to exclude from visualization
+    """
+    if exclude_metrics is None:
+        exclude_metrics = []
+
+    # Filter out excluded metrics
+    plot_df = df[~df["metric"].isin(exclude_metrics)].copy()
+
+    if plot_df.empty:
+        return
+
+    # Create readable metric labels
+    metric_labels = {
+        "last_token_cosine": "Last Token Cosine",
+        "cumulative_cosine": "Cumulative Cosine",
+        "original_accuracy": "Original Accuracy",
+        "kl_divergence": "KL Divergence",
+        "top_k_agreement": "Top-10 Agreement",
+        "replacement_prob_of_original_top": "Repl. P(Original Top)",
+    }
+    plot_df["metric_label"] = plot_df["metric"].map(lambda m: metric_labels.get(m, m))
+
+    # Determine significance level for coloring
+    # Both significant = dark green, t-test only = light green, neither = gray
+    def get_sig_level(row):
+        if row["t_significant"] and row["mw_significant"]:
+            return "both"
+        elif row["t_significant"]:
+            return "t_only"
+        else:
+            return "none"
+
+    plot_df["sig_level"] = plot_df.apply(get_sig_level, axis=1)
+
+    # Color mapping
+    sig_colors = {
+        "both": "#06402B",      # Green - both tests significant
+        "t_only": "#96D9C0",    # Light green - t-test only
+        "none": "#bdc3c7",      # Gray - not significant
+    }
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # Plot Cohen's d
+    ax = axes[0]
+    colors = [sig_colors[level] for level in plot_df["sig_level"]]
+    y_pos = range(len(plot_df))
+
+    bars = ax.barh(y_pos, plot_df["cohens_d"].abs(), color=colors, edgecolor='white', linewidth=0.8)
+
+    # Add significance markers
+    for i, (_, row) in enumerate(plot_df.iterrows()):
+        marker = ""
+        if row["t_significant"] and row["mw_significant"]:
+            marker = "**"
+        elif row["t_significant"]:
+            marker = "*"
+
+        x_pos = abs(row["cohens_d"]) + 0.02
+        ax.text(x_pos, i, marker, va='center', fontsize=12, fontweight='bold')
+
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(plot_df["metric_label"])
+    ax.set_xlabel("|Cohen's d|")
+    ax.set_title("Effect Size: Cohen's d", fontweight='bold')
+    ax.axvline(x=0.2, color='#999', linestyle='--', alpha=0.5, label='small (0.2)')
+    ax.axvline(x=0.5, color='#666', linestyle='--', alpha=0.5, label='medium (0.5)')
+    ax.axvline(x=0.8, color='#333', linestyle='--', alpha=0.5, label='large (0.8)')
+    ax.set_xlim(0, max(plot_df["cohens_d"].abs().max() * 1.2, 1.2))
+    sns.despine(ax=ax, left=True, bottom=True)
+
+    # Plot Rank-biserial r
+    ax = axes[1]
+    bars = ax.barh(y_pos, plot_df["rank_biserial_r"].abs(), color=colors, edgecolor='white', linewidth=0.8)
+
+    # Add significance markers
+    for i, (_, row) in enumerate(plot_df.iterrows()):
+        marker = ""
+        if row["t_significant"] and row["mw_significant"]:
+            marker = "**"
+        elif row["t_significant"]:
+            marker = "*"
+
+        x_pos = abs(row["rank_biserial_r"]) + 0.02
+        ax.text(x_pos, i, marker, va='center', fontsize=12, fontweight='bold')
+
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(plot_df["metric_label"])
+    ax.set_xlabel("|Rank-biserial r|")
+    ax.set_title("Effect Size: Rank-biserial r", fontweight='bold')
+    ax.axvline(x=0.1, color='#999', linestyle='--', alpha=0.5, label='small (0.1)')
+    ax.axvline(x=0.3, color='#666', linestyle='--', alpha=0.5, label='medium (0.3)')
+    ax.axvline(x=0.5, color='#333', linestyle='--', alpha=0.5, label='large (0.5)')
+    ax.set_xlim(0, max(plot_df["rank_biserial_r"].abs().max() * 1.2, 0.7))
+    sns.despine(ax=ax, left=True, bottom=True)
+
+    # Add legend for significance
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor=sig_colors["both"], label='Both tests sig. **'),
+        Patch(facecolor=sig_colors["t_only"], label='T-test only sig. *'),
+        Patch(facecolor=sig_colors["none"], label='Not significant'),
+    ]
+    fig.legend(handles=legend_elements, loc='upper center', ncol=3, bbox_to_anchor=(0.5, 0.02))
+
+    fig.suptitle(title, fontsize=13, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.15)
+
+    plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
+
+
+def plot_token_complexity(df: pd.DataFrame,
+                          output_dir: Path,
+                          conditions: List[str],
+                          palette: List) -> None:
+    """
+    Creates visualizations for token complexity analysis.
+
+    Args:
+        df: DataFrame with columns: condition, zipf_frequency, token_length
+        output_dir: Directory to save visualizations (token_complexity subdir will be created)
+        conditions: List of condition names
+        palette: Color palette for conditions
+    """
+    complexity_dir = output_dir / "token_complexity"
+    complexity_dir.mkdir(parents=True, exist_ok=True)
+
+    complexity_metrics = ["zipf_frequency", "token_length"]
+    complexity_titles = ["Zipf Frequency (higher=more common)", "Token Length"]
+
+    for metric, title in zip(complexity_metrics, complexity_titles):
+        # Bar chart
+        fig, ax = plt.subplots(figsize=(8, 6))
+        means = df.groupby("condition")[metric].mean().reindex(conditions)
+        stds = df.groupby("condition")[metric].std().reindex(conditions)
+
+        ax.bar(range(len(conditions)), means.values, color=palette, alpha=0.8)
+        ax.errorbar(range(len(conditions)), means.values, yerr=stds.values,
+                    fmt='none', color='black', capsize=5)
+
+        ax.set_title(f"Token Complexity: {title}", fontweight='bold')
+        ax.set_xlabel("Condition")
+        ax.set_ylabel(title)
+        ax.set_xticks(range(len(conditions)))
+        ax.set_xticklabels(conditions, rotation=45, ha='right')
+
+        plt.tight_layout()
+        plt.savefig(complexity_dir / f"{metric}_bar.png", dpi=150, bbox_inches='tight')
+        plt.close()
+
+        # Boxplot
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sns.boxplot(data=df, x="condition", y=metric, order=conditions,
+                    palette=palette, ax=ax)
+        sns.stripplot(data=df, x="condition", y=metric, order=conditions,
+                      color='black', alpha=0.5, size=4, ax=ax)
+        ax.set_title(f"Token Complexity: {title}", fontweight='bold')
+        ax.set_xlabel("Condition")
+        ax.set_ylabel(title)
+        ax.set_xticklabels(conditions, rotation=45, ha='right')
+
+        plt.tight_layout()
+        plt.savefig(complexity_dir / f"{metric}_boxplot.png", dpi=150, bbox_inches='tight')
+        plt.close()

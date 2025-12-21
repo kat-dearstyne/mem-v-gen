@@ -1,0 +1,47 @@
+condition,config,original,replacement,match
+memorized,biblical, sea, the,False
+memorized,declaration, earth, ,False
+memorized,dickens, foolishness, the,False
+memorized,dream, color, ,False
+memorized,fox, dog, the,False
+memorized,imagine, hunger, the,False
+memorized,jack-n-jill, water, water,True
+memorized,license, use, the,False
+memorized,lorem, printing, ,False
+memorized,moby_dick, soul, ,False
+memorized,poe, weary, un,False
+memorized,sherlock, truth, the,False
+memorized,sunshine, away, in,False
+memorized,twinkle, are,',False
+memorized,wikipedia, Edit, E,False
+made-up,biblical, sea,",",False
+made-up,declaration, earth, the,False
+made-up,dickens, a, the,False
+made-up,dream, color, the,False
+made-up,fox, dog, ,False
+made-up,imagine, hunger, the,False
+made-up,jack-n-jill, water, the,False
+made-up,license, use, install,False
+made-up,lorem, printing, the,False
+made-up,moby_dick, heart, best,False
+made-up,poe, weary,",",False
+made-up,sherlock, truth, most,False
+made-up,sunshine, away,"
+",False
+made-up,twinkle, are, can,False
+made-up,wikipedia, Edit, ,False
+random,biblical, ocean, ,False
+random,declaration, volcano, ,False
+random,dickens, antics, best,False
+random,dream, colors,",",False
+random,fox, dog, ,False
+random,imagine, hunger, own,False
+random,jack-n-jill, water, the,False
+random,license, use, the,False
+random,lorem, printing, the,False
+random,moby_dick, heart, ,False
+random,poe, tired,",",False
+random,sherlock, approach,",",False
+random,sunshine, back, in,False
+random,twinkle, are, are,True
+random,wikipedia, Edit, the,False
