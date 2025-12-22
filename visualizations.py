@@ -1203,27 +1203,29 @@ def plot_significance_effect_sizes(df: pd.DataFrame,
     """
     Plot pairwise significance with Cohen's d and rank-biserial r effect sizes.
 
+    Uses BH-corrected p-values for significance determination.
+
     Args:
-        df: DataFrame with columns: metric, t_significant, mw_significant, cohens_d, rank_biserial_r
+        df: DataFrame with columns: metric, t_significant_bh, mw_significant_bh, cohens_d, rank_biserial_r
         title: Title for the plot
         save_path: Path to save the visualization
         exclude_metrics: List of metrics to exclude
     """
-    plot_df = _prepare_sig_plot_df(df, exclude_metrics, "t_significant", "mw_significant")
+    plot_df = _prepare_sig_plot_df(df, exclude_metrics, "t_significant_bh", "mw_significant_bh")
     if plot_df.empty:
         return
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    _plot_effect_size_bar(axes[0], plot_df, "cohens_d", "t_significant", "mw_significant",
+    _plot_effect_size_bar(axes[0], plot_df, "cohens_d", "t_significant_bh", "mw_significant_bh",
                           "|Cohen's d|", "Effect Size: Cohen's d",
                           [(0.2, '#999'), (0.5, '#666'), (0.8, '#333')])
 
-    _plot_effect_size_bar(axes[1], plot_df, "rank_biserial_r", "t_significant", "mw_significant",
+    _plot_effect_size_bar(axes[1], plot_df, "rank_biserial_r", "t_significant_bh", "mw_significant_bh",
                           "|Rank-biserial r|", "Effect Size: Rank-biserial r",
                           [(0.1, '#999'), (0.3, '#666'), (0.5, '#333')])
 
-    _save_sig_figure(fig, save_path, title, ("T-test", "MW"))
+    _save_sig_figure(fig, save_path, title, ("T-test (BH)", "MW (BH)"))
 
 
 def plot_omnibus_effect_sizes(df: pd.DataFrame,
@@ -1257,111 +1259,6 @@ def plot_omnibus_effect_sizes(df: pd.DataFrame,
                           [(0.01, '#999'), (0.06, '#666'), (0.14, '#333')])
 
     _save_sig_figure(fig, save_path, title, ("ANOVA", "Kruskal"))
-
-
-def plot_perplexity_relationships(df: pd.DataFrame,
-                                   output_dir: Path,
-                                   conditions: List[str],
-                                   palette: List) -> None:
-    """
-    Creates scatter plots showing relationship between perplexity and accuracy metrics.
-
-    Args:
-        df: DataFrame with perplexity and accuracy metric columns
-        output_dir: Directory to save visualizations
-        conditions: List of condition names
-        palette: Color palette for conditions
-    """
-    perplexity_dir = output_dir / "perplexity"
-    perplexity_dir.mkdir(parents=True, exist_ok=True)
-
-    accuracy_metrics = [
-        ("last_token_cosine", "Last Token Cosine"),
-        ("cumulative_cosine", "Cumulative Cosine"),
-        ("original_accuracy", "Original Accuracy"),
-        ("kl_divergence", "KL Divergence"),
-    ]
-
-    perplexity_metrics = [
-        ("perplexity_last_token", "Perplexity (Last Token)"),
-        ("perplexity_full", "Perplexity (Full Sequence)"),
-    ]
-
-    # Filter out rows with None perplexity
-    plot_df = df.dropna(subset=["perplexity_last_token", "perplexity_full"])
-
-    if plot_df.empty:
-        return
-
-    condition_colors = {cond: palette[i] for i, cond in enumerate(conditions)}
-
-    # Create scatter plots for each perplexity metric vs accuracy metrics
-    for ppl_col, ppl_label in perplexity_metrics:
-        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-        axes = axes.flatten()
-
-        for i, (acc_col, acc_label) in enumerate(accuracy_metrics):
-            ax = axes[i]
-
-            for cond in conditions:
-                cond_df = plot_df[plot_df["condition"] == cond]
-                if cond_df.empty:
-                    continue
-                ax.scatter(
-                    cond_df[ppl_col],
-                    cond_df[acc_col],
-                    c=[condition_colors[cond]],
-                    label=cond,
-                    alpha=0.7,
-                    s=50,
-                )
-
-            # Calculate overall correlation
-            corr = plot_df[[ppl_col, acc_col]].corr().iloc[0, 1]
-            ax.set_xlabel(ppl_label)
-            ax.set_ylabel(acc_label)
-            ax.set_title(f"{acc_label} vs {ppl_label}\n(r = {corr:.3f})")
-            ax.legend()
-            sns.despine(ax=ax)
-
-        plt.tight_layout()
-        safe_name = ppl_col.replace("perplexity_", "")
-        plt.savefig(perplexity_dir / f"perplexity_{safe_name}_vs_metrics.png",
-                    dpi=150, bbox_inches='tight', facecolor='white')
-        plt.close()
-
-    # Combined plot: both perplexity metrics side by side for each accuracy metric
-    for acc_col, acc_label in accuracy_metrics:
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-
-        for j, (ppl_col, ppl_label) in enumerate(perplexity_metrics):
-            ax = axes[j]
-
-            for cond in conditions:
-                cond_df = plot_df[plot_df["condition"] == cond]
-                if cond_df.empty:
-                    continue
-                ax.scatter(
-                    cond_df[ppl_col],
-                    cond_df[acc_col],
-                    c=[condition_colors[cond]],
-                    label=cond,
-                    alpha=0.7,
-                    s=50,
-                )
-
-            corr = plot_df[[ppl_col, acc_col]].corr().iloc[0, 1]
-            ax.set_xlabel(ppl_label)
-            ax.set_ylabel(acc_label)
-            ax.set_title(f"r = {corr:.3f}")
-            ax.legend()
-            sns.despine(ax=ax)
-
-        fig.suptitle(f"{acc_label} vs Perplexity", fontweight='bold', y=1.02)
-        plt.tight_layout()
-        plt.savefig(perplexity_dir / f"{acc_col}_vs_perplexity.png",
-                    dpi=150, bbox_inches='tight', facecolor='white')
-        plt.close()
 
 
 def plot_token_complexity(df: pd.DataFrame,
@@ -1417,3 +1314,114 @@ def plot_token_complexity(df: pd.DataFrame,
         plt.tight_layout()
         plt.savefig(complexity_dir / f"{metric}_boxplot.png", dpi=150, bbox_inches='tight')
         plt.close()
+
+
+def plot_per_position_curves(results: dict,
+                              output_dir: Path,
+                              conditions: List[str],
+                              palette: List) -> None:
+    """
+    Plot per-position error and perplexity curves for each prompt.
+
+    Creates line plots showing how metrics evolve across token positions,
+    with one line per prompt, colored by condition.
+
+    Args:
+        results: Dictionary structured as {condition: {config_name: metrics_dict}}
+        output_dir: Directory to save visualizations
+        conditions: List of condition names
+        palette: Color palette for conditions
+    """
+    curves_dir = output_dir / "per_position_curves"
+    curves_dir.mkdir(parents=True, exist_ok=True)
+
+    condition_colors = {cond: palette[i] for i, cond in enumerate(conditions)}
+
+    # Collect all per-position data
+    curve_data = []
+    for condition, config_metrics in results.items():
+        for config_name, metrics in config_metrics.items():
+            curve_data.append({
+                "condition": condition,
+                "config": config_name,
+                "per_position_cosine": metrics.get("per_position_cosine", []),
+                "per_position_kl": metrics.get("per_position_kl", []),
+                "per_position_argmax_match": metrics.get("per_position_argmax_match", []),
+                "per_position_cross_entropy": metrics.get("per_position_cross_entropy", []),
+            })
+
+    if not curve_data:
+        return
+
+    metrics_config = [
+        ("per_position_cosine", "Cosine Similarity", "Position", "Cosine Similarity"),
+        ("per_position_kl", "KL Divergence", "Position", "KL Divergence (nats)"),
+        ("per_position_argmax_match", "Argmax Match", "Position", "Match (1=same, 0=different)"),
+        ("per_position_cross_entropy", "Cross-Entropy", "Position", "Cross-Entropy (nats)"),
+    ]
+
+    # Plot each metric
+    for metric_key, metric_title, xlabel, ylabel in metrics_config:
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        for item in curve_data:
+            values = item[metric_key]
+            if not values:
+                continue
+
+            positions = list(range(len(values)))
+            color = condition_colors.get(item["condition"], "gray")
+
+            ax.plot(positions, values,
+                    color=color,
+                    alpha=0.6,
+                    linewidth=1.5,
+                    label=f"{item['condition']}: {item['config']}")
+
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"Per-Position {metric_title}", fontweight='bold')
+
+        # Create legend with just conditions
+        handles = [plt.Line2D([0], [0], color=condition_colors[c], linewidth=2, label=c)
+                   for c in conditions if c in condition_colors]
+        ax.legend(handles=handles, title="Condition", loc='best')
+
+        sns.despine(ax=ax)
+        plt.tight_layout()
+        plt.savefig(curves_dir / f"{metric_key}.png", dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close()
+
+    # Combined plot: all error metrics (cosine, KL, argmax) in subplots
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    axes = axes.flatten()
+
+    for ax_idx, (metric_key, metric_title, xlabel, ylabel) in enumerate(metrics_config):
+        ax = axes[ax_idx]
+
+        for item in curve_data:
+            values = item[metric_key]
+            if not values:
+                continue
+
+            positions = list(range(len(values)))
+            color = condition_colors.get(item["condition"], "gray")
+
+            ax.plot(positions, values,
+                    color=color,
+                    alpha=0.5,
+                    linewidth=1)
+
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(metric_title, fontweight='bold')
+        sns.despine(ax=ax)
+
+    # Add single legend
+    handles = [plt.Line2D([0], [0], color=condition_colors[c], linewidth=2, label=c)
+               for c in conditions if c in condition_colors]
+    fig.legend(handles=handles, title="Condition", loc='upper right', bbox_to_anchor=(0.99, 0.99))
+
+    plt.tight_layout()
+    plt.savefig(curves_dir / "combined_per_position.png", dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()

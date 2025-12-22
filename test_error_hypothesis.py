@@ -30,7 +30,7 @@ from visualizations import (
     plot_token_complexity,
     plot_significance_effect_sizes,
     plot_omnibus_effect_sizes,
-    plot_perplexity_relationships,
+    plot_per_position_curves,
 )
 
 # Condition names mapping to config structure:
@@ -57,6 +57,11 @@ AccuracyMetrics = namedtuple("AccuracyMetrics", [
     "replacement_prob_of_original_top",
     "perplexity_last_token",
     "perplexity_full",
+    # Per-position arrays for curve plotting
+    "per_position_cosine",
+    "per_position_kl",
+    "per_position_argmax_match",
+    "per_position_cross_entropy",
 ])
 
 TOP_K = 10  # For top-k agreement metric
@@ -128,6 +133,78 @@ def get_last_token_accuracy(base_logits_BPV, replacement_logits_BPV):
     return accuracy
 
 
+def get_per_position_cosine(base_logits_BPV, replacement_logits_BPV) -> list[float]:
+    """
+    Compute cosine similarity at each token position.
+
+    Args:
+        base_logits_BPV: Base model logits (batch, position, vocab)
+        replacement_logits_BPV: Replacement model logits (batch, position, vocab)
+
+    Returns:
+        List of cosine similarities, one per position.
+    """
+    num_tokens = base_logits_BPV.shape[1]
+    cosines = []
+
+    for i in range(num_tokens):
+        base_logits_V = base_logits_BPV[0, i]
+        replacement_logits_V = replacement_logits_BPV[0, i]
+
+        base_norm = torch.linalg.norm(base_logits_V)
+        replacement_norm = torch.linalg.norm(replacement_logits_V)
+
+        cosine = (base_logits_V.T @ replacement_logits_V.T) / (base_norm * replacement_norm)
+        cosines.append(torch.abs(cosine).item())
+
+    return cosines
+
+
+def get_per_position_kl_divergence(base_logits_BPV, replacement_logits_BPV) -> list[float]:
+    """
+    Compute KL divergence at each token position.
+
+    Args:
+        base_logits_BPV: Base model logits (batch, position, vocab)
+        replacement_logits_BPV: Replacement model logits (batch, position, vocab)
+
+    Returns:
+        List of KL divergences (in nats), one per position.
+    """
+    num_tokens = base_logits_BPV.shape[1]
+    kl_divs = []
+
+    for i in range(num_tokens):
+        base_logits = base_logits_BPV[0, i].float()
+        replacement_logits = replacement_logits_BPV[0, i].float()
+
+        base_log_probs = torch.log_softmax(base_logits, dim=-1)
+        replacement_log_probs = torch.log_softmax(replacement_logits, dim=-1)
+        base_probs = base_log_probs.exp()
+
+        kl_div = torch.sum(base_probs * (base_log_probs - replacement_log_probs))
+        kl_divs.append(kl_div.item())
+
+    return kl_divs
+
+
+def get_per_position_argmax_match(base_logits_BPV, replacement_logits_BPV) -> list[int]:
+    """
+    Compute argmax match at each token position.
+
+    Args:
+        base_logits_BPV: Base model logits (batch, position, vocab)
+        replacement_logits_BPV: Replacement model logits (batch, position, vocab)
+
+    Returns:
+        List of matches (1 if argmax matches, 0 otherwise), one per position.
+    """
+    base_argmax = base_logits_BPV[0].argmax(dim=-1)  # (seq_len,)
+    replacement_argmax = replacement_logits_BPV[0].argmax(dim=-1)  # (seq_len,)
+    matches = (base_argmax == replacement_argmax).int().tolist()
+    return matches
+
+
 def get_cumulative_token_accuracy(base_logits_BPV, replacement_logits_BPV):
     """
     Compute average cosine similarity across all token positions.
@@ -139,23 +216,8 @@ def get_cumulative_token_accuracy(base_logits_BPV, replacement_logits_BPV):
     Returns:
         Average cosine similarity across all positions.
     """
-    accuracy = 0
-    num_tokens = base_logits_BPV.shape[1]
-
-    for i in range(num_tokens):
-        base_logits_V = base_logits_BPV[0, i]
-        replacement_logits_V = replacement_logits_BPV[0, i]
-
-        base_norm = torch.linalg.norm(base_logits_V)
-        replacement_norm = torch.linalg.norm(replacement_logits_V)
-
-        cosine_distance = (base_logits_V.T @ replacement_logits_V.T) / (base_norm * replacement_norm)
-        cosine_distance = torch.abs(cosine_distance).item()
-
-        accuracy += cosine_distance
-
-    accuracy /= num_tokens
-    return accuracy
+    cosines = get_per_position_cosine(base_logits_BPV, replacement_logits_BPV)
+    return sum(cosines) / len(cosines)
 
 
 def get_original_accuracy_metric(base_logits_BPV, replacement_logits_BPV, prompt_tokens):
@@ -243,6 +305,39 @@ def get_replacement_prob_of_original_top(base_logits_BPV, replacement_logits_BPV
     return replacement_probs[original_top_token_id].item()
 
 
+def get_per_position_cross_entropy(base_logits_BPV, prompt_tokens, model, memorized_completion: str) -> list[float]:
+    """
+    Compute cross-entropy at each position (position i predicting token i+1).
+
+    Args:
+        base_logits_BPV: Base model logits (batch, position, vocab)
+        prompt_tokens: Tokenized prompt (seq_len,)
+        model: The model instance (for tokenizer access)
+        memorized_completion: The expected completion string
+
+    Returns:
+        List of cross-entropy values, one per position.
+        Length is seq_len (prefix positions + final position predicting completion).
+    """
+    if not memorized_completion:
+        return []
+
+    # Tokenize the completion to get the first token
+    completion_tokens = model.tokenizer.encode(memorized_completion, add_special_tokens=False)
+    first_completion_token = completion_tokens[0]
+
+    logits = base_logits_BPV[0].float()  # (seq_len, vocab)
+    # Targets: tokens[1:] for prefix, then first_completion_token for last position
+    targets = torch.cat([prompt_tokens[1:], torch.tensor([first_completion_token], device=prompt_tokens.device)])
+
+    ce_per_pos = []
+    for i in range(logits.shape[0]):
+        ce = torch.nn.functional.cross_entropy(logits[i].unsqueeze(0), targets[i].unsqueeze(0))
+        ce_per_pos.append(ce.item())
+
+    return ce_per_pos
+
+
 def get_base_perplexity(base_logits_BPV, prompt_tokens, model, memorized_completion: str):
     """
     Calculate perplexity for the prompt and the first token of the memorized completion.
@@ -253,36 +348,19 @@ def get_base_perplexity(base_logits_BPV, prompt_tokens, model, memorized_complet
 
     Args:
         base_logits_BPV: Base model logits (batch, position, vocab)
-        prompt_tokens: Tokenized prompt (batch, seq_len)
+        prompt_tokens: Tokenized prompt (seq_len,)
         model: The model instance (for tokenizer access)
         memorized_completion: The expected completion string
 
     Returns:
         Tuple of (last_token_ppl, full_ppl), or (None, None) if memorized_completion not provided.
     """
-    if not memorized_completion:
+    ce_per_pos = get_per_position_cross_entropy(base_logits_BPV, prompt_tokens, model, memorized_completion)
+    if not ce_per_pos:
         return None, None
 
-    # Tokenize the completion to get the first token
-    completion_tokens = model.tokenizer.encode(memorized_completion, add_special_tokens=False)
-    first_completion_token = completion_tokens[0]
-
-    # Cross entropy for last position predicting completion token
-    last_logits = base_logits_BPV[0, -1].float()
-    target_last = torch.tensor([first_completion_token], device=last_logits.device)
-    ce_last = torch.nn.functional.cross_entropy(last_logits.unsqueeze(0), target_last)
-    last_token_ppl = torch.exp(ce_last).item()
-
-    # Cross entropy for prefix: position i predicts token i+1
-    # Logits: [0, 1, ..., N-2] predict tokens [1, 2, ..., N-1]
-    prefix_logits = base_logits_BPV[0, :-1].float()  # (seq_len-1, vocab)
-    prefix_targets = prompt_tokens[1:]  # (seq_len-1,)
-    ce_prefix = torch.nn.functional.cross_entropy(prefix_logits, prefix_targets, reduction='mean')
-
-    # Full perplexity: average CE over all positions (prefix + last)
-    n_prefix = prefix_logits.shape[0]
-    total_ce = (ce_prefix * n_prefix + ce_last) / (n_prefix + 1)
-    full_ppl = torch.exp(total_ce).item()
+    last_token_ppl = np.exp(ce_per_pos[-1])
+    full_ppl = np.exp(np.mean(ce_per_pos))
 
     return last_token_ppl, full_ppl
 
@@ -337,8 +415,18 @@ def run_accuracy_test(model, prompt_str: str, memorized_completion: str = None) 
         replacement_top_token = model.tokenizer.decode([replacement_top_token_id])
         ppl_last, ppl_full = get_base_perplexity(base_logits_BPV, prompt_tokens, model, memorized_completion)
 
+    # Per-position metrics
+    per_pos_cosine = get_per_position_cosine(base_logits_BPV, replacement_logits_BPV)
+    per_pos_kl = get_per_position_kl_divergence(base_logits_BPV, replacement_logits_BPV)
+    per_pos_argmax = get_per_position_argmax_match(base_logits_BPV, replacement_logits_BPV)
+    if IS_TEST:
+        per_pos_ce = []
+    else:
+        per_pos_ce = get_per_position_cross_entropy(base_logits_BPV, prompt_tokens, model, memorized_completion)
+
+    # Aggregate metrics
     last_token_acc = get_last_token_accuracy(base_logits_BPV, replacement_logits_BPV)
-    cumulative_acc = get_cumulative_token_accuracy(base_logits_BPV, replacement_logits_BPV)
+    cumulative_acc = sum(per_pos_cosine) / len(per_pos_cosine)
     orig_acc = get_original_accuracy_metric(base_logits_BPV, replacement_logits_BPV, prompt_tokens)
     kl_div = get_kl_divergence(base_logits_BPV, replacement_logits_BPV)
     top_k_agree = get_top_k_agreement(base_logits_BPV, replacement_logits_BPV)
@@ -355,6 +443,10 @@ def run_accuracy_test(model, prompt_str: str, memorized_completion: str = None) 
         replacement_prob_of_original_top=repl_prob_orig,
         perplexity_last_token=ppl_last,
         perplexity_full=ppl_full,
+        per_position_cosine=per_pos_cosine,
+        per_position_kl=per_pos_kl,
+        per_position_argmax_match=per_pos_argmax,
+        per_position_cross_entropy=per_pos_ce,
     )
 
 
@@ -967,8 +1059,8 @@ def analyze_results(output_dir: Path = OUTPUT_DIR):
             exclude_metrics=exclude_metrics,
         )
 
-    # Perplexity vs accuracy metrics visualizations
-    plot_perplexity_relationships(df, output_dir, conditions, palette)
+    # Per-position curve visualizations
+    plot_per_position_curves(results, output_dir, conditions, palette)
 
     # Token complexity analysis
     analyze_token_complexity(df, output_dir)
