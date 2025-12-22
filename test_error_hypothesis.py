@@ -276,7 +276,7 @@ def get_base_perplexity(base_logits_BPV, prompt_tokens, model, memorized_complet
     # Cross entropy for prefix: position i predicts token i+1
     # Logits: [0, 1, ..., N-2] predict tokens [1, 2, ..., N-1]
     prefix_logits = base_logits_BPV[0, :-1].float()  # (seq_len-1, vocab)
-    prefix_targets = prompt_tokens[0, 1:]  # (seq_len-1,)
+    prefix_targets = prompt_tokens[1:]  # (seq_len-1,)
     ce_prefix = torch.nn.functional.cross_entropy(prefix_logits, prefix_targets, reduction='mean')
 
     # Full perplexity: average CE over all positions (prefix + last)
