@@ -29,8 +29,9 @@ from visualizations import (
     plot_error_hypothesis_combined_boxplot,
     plot_token_complexity,
     plot_significance_effect_sizes,
+    plot_omnibus_effect_sizes,
+    plot_perplexity_relationships,
 )
-
 
 # Condition names mapping to config structure:
 # CONDITIONS[0] -> MAIN_PROMPT
@@ -54,6 +55,8 @@ AccuracyMetrics = namedtuple("AccuracyMetrics", [
     "kl_divergence",
     "top_k_agreement",
     "replacement_prob_of_original_top",
+    "perplexity_last_token",
+    "perplexity_full",
 ])
 
 TOP_K = 10  # For top-k agreement metric
@@ -61,6 +64,7 @@ TOP_K = 10  # For top-k agreement metric
 IS_TEST = get_env_bool("IS_TEST", False)
 ANALYZE_RESULTS = get_env_bool("ANALYZE_RESULTS", False)
 RUN_SANITY_CHECK = get_env_bool("RUN_SANITY_CHECK", False)
+
 
 def get_replacement_logits(model, prompt_tokens):
     """
@@ -187,11 +191,13 @@ def get_kl_divergence(base_logits_BPV, replacement_logits_BPV):
     base_logits = base_logits_BPV[0, -1].float()
     replacement_logits = replacement_logits_BPV[0, -1].float()
 
-    base_probs = torch.softmax(base_logits, dim=-1)
+    base_log_probs = torch.log_softmax(base_logits, dim=-1)
     replacement_log_probs = torch.log_softmax(replacement_logits, dim=-1)
+    base_probs = base_log_probs.exp()
 
-    # KL(P || Q) = sum(P * log(P/Q)) = sum(P * log(P)) - sum(P * log(Q))
-    kl_div = torch.sum(base_probs * (torch.log(base_probs + 1e-10) - replacement_log_probs))
+    kl_div = torch.sum(
+        base_probs * (base_log_probs - replacement_log_probs)
+    )
     return kl_div.item()
 
 
@@ -237,6 +243,50 @@ def get_replacement_prob_of_original_top(base_logits_BPV, replacement_logits_BPV
     return replacement_probs[original_top_token_id].item()
 
 
+def get_base_perplexity(base_logits_BPV, prompt_tokens, model, memorized_completion: str):
+    """
+    Calculate perplexity for the prompt and the first token of the memorized completion.
+
+    Returns both:
+    - last_token_ppl: Perplexity just for predicting the first completion token
+    - full_ppl: Perplexity over entire sequence (prompt + first completion token)
+
+    Args:
+        base_logits_BPV: Base model logits (batch, position, vocab)
+        prompt_tokens: Tokenized prompt (batch, seq_len)
+        model: The model instance (for tokenizer access)
+        memorized_completion: The expected completion string
+
+    Returns:
+        Tuple of (last_token_ppl, full_ppl), or (None, None) if memorized_completion not provided.
+    """
+    if not memorized_completion:
+        return None, None
+
+    # Tokenize the completion to get the first token
+    completion_tokens = model.tokenizer.encode(memorized_completion, add_special_tokens=False)
+    first_completion_token = completion_tokens[0]
+
+    # Cross entropy for last position predicting completion token
+    last_logits = base_logits_BPV[0, -1].float()
+    target_last = torch.tensor([first_completion_token], device=last_logits.device)
+    ce_last = torch.nn.functional.cross_entropy(last_logits.unsqueeze(0), target_last)
+    last_token_ppl = torch.exp(ce_last).item()
+
+    # Cross entropy for prefix: position i predicts token i+1
+    # Logits: [0, 1, ..., N-2] predict tokens [1, 2, ..., N-1]
+    prefix_logits = base_logits_BPV[0, :-1].float()  # (seq_len-1, vocab)
+    prefix_targets = prompt_tokens[0, 1:]  # (seq_len-1,)
+    ce_prefix = torch.nn.functional.cross_entropy(prefix_logits, prefix_targets, reduction='mean')
+
+    # Full perplexity: average CE over all positions (prefix + last)
+    n_prefix = prefix_logits.shape[0]
+    total_ce = (ce_prefix * n_prefix + ce_last) / (n_prefix + 1)
+    full_ppl = torch.exp(total_ce).item()
+
+    return last_token_ppl, full_ppl
+
+
 def load_model():
     """Load the ReplacementModel with CLT transcoders."""
     hf_token = os.environ.get("HF_TOKEN")
@@ -253,13 +303,14 @@ def load_model():
     return model
 
 
-def run_accuracy_test(model, prompt_str: str) -> AccuracyMetrics:
+def run_accuracy_test(model, prompt_str: str, memorized_completion: str = None) -> AccuracyMetrics:
     """
     Run accuracy comparison for a single prompt.
 
     Args:
         model: The ReplacementModel instance
         prompt_str: The prompt string to test
+        memorized_completion: The "correct" completion for prompt set
 
     Returns:
         AccuracyMetrics namedtuple with all accuracy measurements
@@ -271,6 +322,7 @@ def run_accuracy_test(model, prompt_str: str) -> AccuracyMetrics:
         replacement_logits_BPV = torch.randn((1, 10, 256000), dtype=torch.bfloat16)
         original_top_token = "<test>"
         replacement_top_token = "<test>"
+        ppl_last, ppl_full = None, None
     else:
         prompt_tokens = model.ensure_tokenized(prompt_str)
 
@@ -283,6 +335,7 @@ def run_accuracy_test(model, prompt_str: str) -> AccuracyMetrics:
         replacement_top_token_id = replacement_logits_BPV[0, -1].argmax().item()
         original_top_token = model.tokenizer.decode([original_top_token_id])
         replacement_top_token = model.tokenizer.decode([replacement_top_token_id])
+        ppl_last, ppl_full = get_base_perplexity(base_logits_BPV, prompt_tokens, model, memorized_completion)
 
     last_token_acc = get_last_token_accuracy(base_logits_BPV, replacement_logits_BPV)
     cumulative_acc = get_cumulative_token_accuracy(base_logits_BPV, replacement_logits_BPV)
@@ -300,6 +353,8 @@ def run_accuracy_test(model, prompt_str: str) -> AccuracyMetrics:
         kl_divergence=kl_div,
         top_k_agreement=top_k_agree,
         replacement_prob_of_original_top=repl_prob_orig,
+        perplexity_last_token=ppl_last,
+        perplexity_full=ppl_full,
     )
 
 
@@ -356,12 +411,13 @@ def run_analysis_for_configs(model, config_dir: Path = CONFIG_DIR) -> dict:
                 continue
 
             prompt = get_prompt_for_condition(config, cond_idx)
+            memorized_completion = config.get("MEMORIZED_COMPLETION", None)
             if prompt is None:
                 print(f"  {condition}: No prompt available, skipping")
                 continue
 
             print(f"  {condition}: {prompt[:50]}...")
-            metrics = run_accuracy_test(model, prompt)
+            metrics = run_accuracy_test(model, prompt, memorized_completion)
             results[condition][config_name] = metrics
 
     return results
@@ -436,95 +492,112 @@ LOWER_IS_BETTER_METRICS = ["kl_divergence"]
 ALL_METRICS = HIGHER_IS_BETTER_METRICS + LOWER_IS_BETTER_METRICS
 
 
-def compute_pooled_significance(
-    df: pd.DataFrame,
-    target_condition: str,
-    other_conditions: list,
-    test_target_worse: bool = True,
+def compute_cohens_d(group1: np.ndarray, group2: np.ndarray) -> float:
+    """
+    Compute Cohen's d effect size using pooled standard deviation.
+
+    Uses the average of variances (Welch-consistent, equal-n friendly).
+    """
+    sx = np.std(group1, ddof=1)
+    sy = np.std(group2, ddof=1)
+    denom = np.sqrt((sx ** 2 + sy ** 2) / 2)
+    return (group1.mean() - group2.mean()) / denom if denom > 0 else 0.0
+
+
+def compute_rank_biserial(mw_stat: float, n1: int, n2: int) -> float:
+    """
+    Compute rank-biserial correlation from Mann-Whitney U statistic.
+
+    Uses the common sign convention: r = 2U/(n1*n2) - 1
+    """
+    return (2 * mw_stat) / (n1 * n2) - 1
+
+
+def apply_bh_correction(results_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply Benjamini-Hochberg FDR correction to t-test and Mann-Whitney p-values.
+
+    Adds columns: t_p_value_bh, t_significant_bh, mw_p_value_bh, mw_significant_bh
+    """
+    if results_df.empty:
+        return results_df
+
+    t_p_adjusted = stats.false_discovery_control(results_df["t_p_value"].values, method='bh')
+    mw_p_adjusted = stats.false_discovery_control(results_df["mw_p_value"].values, method='bh')
+
+    results_df["t_p_value_bh"] = t_p_adjusted
+    results_df["t_significant_bh"] = t_p_adjusted < 0.05
+    results_df["mw_p_value_bh"] = mw_p_adjusted
+    results_df["mw_significant_bh"] = mw_p_adjusted < 0.05
+
+    return results_df
+
+
+def compute_omnibus_significance(
+        df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Compute significance comparing target condition against ALL other conditions pooled.
+    Compute omnibus significance tests (ANOVA and Kruskal-Wallis) across all conditions.
+
+    These tests determine whether there is a significant difference among ANY of the
+    groups, without specifying which groups differ. Use alongside pairwise comparisons.
 
     Args:
         df: DataFrame with columns: condition and metric columns
-        target_condition: The condition to compare against pooled others
-        other_conditions: List of conditions to pool together
-        test_target_worse: If True, test if target performs worse (lower similarity, higher KL).
-                          If False, test if target performs better.
 
     Returns:
-        DataFrame with significance results (one row per metric)
+        DataFrame with omnibus test results (one row per metric)
     """
-    available_conditions = df["condition"].unique().tolist()
-    if target_condition not in available_conditions:
+    conditions = df["condition"].unique().tolist()
+    if len(conditions) < 2:
         return pd.DataFrame()
-
-    other_conditions = [c for c in other_conditions if c in available_conditions]
-    if not other_conditions:
-        return pd.DataFrame()
-
-    target_data = df[df["condition"] == target_condition]
-    pooled_data = df[df["condition"].isin(other_conditions)]
 
     results_rows = []
 
     for metric in ALL_METRICS:
-        target_values = target_data[metric].values
-        pooled_values = pooled_data[metric].values
-        is_higher_better = metric in HIGHER_IS_BETTER_METRICS
+        # Get values for each condition
+        groups = [df[df["condition"] == cond][metric].values for cond in conditions]
 
-        # Determine test direction
-        if test_target_worse:
-            alternative = 'less' if is_higher_better else 'greater'
-        else:
-            alternative = 'greater' if is_higher_better else 'less'
+        # ANOVA (parametric) - tests if means differ
+        f_stat, anova_p = stats.f_oneway(*groups)
 
-        # Mann-Whitney U test (non-parametric)
-        mw_stat, mw_p = stats.mannwhitneyu(target_values, pooled_values, alternative=alternative)
+        # Kruskal-Wallis (non-parametric) - tests if distributions differ
+        h_stat, kruskal_p = stats.kruskal(*groups)
 
-        # T-test (parametric)
-        t_stat, t_p = stats.ttest_ind(target_values, pooled_values, alternative=alternative)
+        # Effect size: eta-squared for ANOVA
+        all_values = np.concatenate(groups)
+        grand_mean = all_values.mean()
+        ss_total = np.sum((all_values - grand_mean) ** 2)
+        ss_between = sum(len(g) * (g.mean() - grand_mean) ** 2 for g in groups)
+        eta_squared = ss_between / ss_total if ss_total > 0 else 0
 
-        # Effect size: Cohen's d
-        pooled_std = np.sqrt(((len(target_values)-1)*target_values.std()**2 +
-                              (len(pooled_values)-1)*pooled_values.std()**2) /
-                             (len(target_values) + len(pooled_values) - 2))
-        cohens_d = (target_values.mean() - pooled_values.mean()) / pooled_std if pooled_std > 0 else 0
-
-        # Effect size: rank-biserial correlation (for Mann-Whitney)
-        n1, n2 = len(target_values), len(pooled_values)
-        rank_biserial = 1 - (2 * mw_stat) / (n1 * n2)
+        # Effect size: epsilon-squared for Kruskal-Wallis
+        k = len(groups)
+        n = len(all_values)
+        epsilon_squared = (h_stat - k + 1) / (n - k)
 
         results_rows.append({
             "metric": metric,
-            "comparison": f"{target_condition} vs pooled({'+'.join(other_conditions)})",
-            "target_condition": target_condition,
-            "other_conditions": "+".join(other_conditions),
-            "test_direction": "target_worse" if test_target_worse else "target_better",
-            "target_mean": target_values.mean(),
-            "target_std": target_values.std(),
-            "pooled_mean": pooled_values.mean(),
-            "pooled_std": pooled_values.std(),
-            "n_target": n1,
-            "n_pooled": n2,
-            "t_statistic": t_stat,
-            "t_p_value": t_p,
-            "t_significant": t_p < 0.05,
-            "mann_whitney_u": mw_stat,
-            "mw_p_value": mw_p,
-            "mw_significant": mw_p < 0.05,
-            "cohens_d": cohens_d,
-            "rank_biserial_r": rank_biserial,
+            "conditions": ", ".join(conditions),
+            "n_groups": len(conditions),
+            "f_statistic": f_stat,
+            "anova_p_value": anova_p,
+            "anova_significant": anova_p < 0.05,
+            "eta_squared": eta_squared,
+            "h_statistic": h_stat,
+            "kruskal_p_value": kruskal_p,
+            "kruskal_significant": kruskal_p < 0.05,
+            "epsilon_squared": epsilon_squared,
         })
 
     return pd.DataFrame(results_rows)
 
 
 def compute_pairwise_significance(
-    df: pd.DataFrame,
-    target_condition: str,
-    other_conditions: list,
-    test_target_worse: bool = True,
+        df: pd.DataFrame,
+        target_condition: str,
+        other_conditions: list,
+        test_target_worse: bool = True,
 ) -> pd.DataFrame:
     """
     Core function to compute pairwise significance between conditions.
@@ -569,17 +642,13 @@ def compute_pairwise_significance(
             mw_stat, mw_p = stats.mannwhitneyu(target_values, other_values, alternative=alternative)
 
             # T-test (parametric)
-            t_stat, t_p = stats.ttest_ind(target_values, other_values, alternative=alternative)
+            t_stat, t_p = stats.ttest_ind(target_values, other_values, alternative=alternative, equal_var=False)
 
-            # Effect size: Cohen's d
-            pooled_std = np.sqrt(((len(target_values)-1)*target_values.std()**2 +
-                                  (len(other_values)-1)*other_values.std()**2) /
-                                 (len(target_values) + len(other_values) - 2))
-            cohens_d = (target_values.mean() - other_values.mean()) / pooled_std if pooled_std > 0 else 0
-
-            # Effect size: rank-biserial correlation (for Mann-Whitney)
+            # Effect sizes
             n1, n2 = len(target_values), len(other_values)
-            rank_biserial = 1 - (2 * mw_stat) / (n1 * n2)
+            assert n1 == n2, "Expected same sample size."
+            cohens_d = compute_cohens_d(target_values, other_values)
+            rank_biserial = compute_rank_biserial(mw_stat, n1, n2)
 
             results_rows.append({
                 "metric": metric,
@@ -588,9 +657,9 @@ def compute_pairwise_significance(
                 "other_condition": other_cond,
                 "test_direction": "target_worse" if test_target_worse else "target_better",
                 "target_mean": target_values.mean(),
-                "target_std": target_values.std(),
                 "other_mean": other_values.mean(),
-                "other_std": other_values.std(),
+                "target_std": np.std(target_values, ddof=1),
+                "other_std": np.std(other_values, ddof=1),
                 "n_per_group": n1,
                 "t_statistic": t_stat,
                 "t_p_value": t_p,
@@ -602,7 +671,8 @@ def compute_pairwise_significance(
                 "rank_biserial_r": rank_biserial,
             })
 
-    return pd.DataFrame(results_rows)
+    results_df = pd.DataFrame(results_rows)
+    return apply_bh_correction(results_df)
 
 
 def print_significant_results(results_df: pd.DataFrame, label: str):
@@ -623,20 +693,21 @@ def print_significant_results(results_df: pd.DataFrame, label: str):
     print(f"{label} Mann Whitney Significant Results: ", mw_significant)
 
 
-def analyze_metric_significance(df: pd.DataFrame, output_dir: Path) -> tuple:
+def analyze_metric_significance(df: pd.DataFrame, output_dir: Path) -> dict:
     """
     Analyze statistical significance of metrics comparing memorized vs other conditions.
 
     Tests whether memorized condition performs worse than other conditions.
-    Saves pairwise results to significance_analysis.csv and pooled results to
-    pooled_significance_analysis.csv.
+    Saves results to CSV files:
+    - significance_analysis.csv: Pairwise comparisons with BH correction
+    - omnibus_significance_analysis.csv: ANOVA and Kruskal-Wallis
 
     Args:
         df: DataFrame with columns: condition and metric columns
         output_dir: Directory to save results CSV
 
     Returns:
-        Tuple of (pairwise_results_df, pooled_results_df)
+        Dict with keys: pairwise, omnibus
     """
     conditions = df["condition"].unique().tolist()
     other_conditions = [c for c in conditions if c != "memorized"]
@@ -652,18 +723,16 @@ def analyze_metric_significance(df: pd.DataFrame, output_dir: Path) -> tuple:
     if not pairwise_df.empty:
         pairwise_df.to_csv(output_dir / "significance_analysis.csv", index=False)
 
-    # Pooled comparison (memorized vs all other conditions combined)
-    pooled_df = compute_pooled_significance(
-        df,
-        target_condition="memorized",
-        other_conditions=other_conditions,
-        test_target_worse=True,
-    )
+    # Omnibus tests (ANOVA, Kruskal-Wallis)
+    omnibus_df = compute_omnibus_significance(df)
 
-    if not pooled_df.empty:
-        pooled_df.to_csv(output_dir / "pooled_significance_analysis.csv", index=False)
+    if not omnibus_df.empty:
+        omnibus_df.to_csv(output_dir / "omnibus_significance_analysis.csv", index=False)
 
-    return pairwise_df, pooled_df
+    return {
+        "pairwise": pairwise_df,
+        "omnibus": omnibus_df,
+    }
 
 
 def sanity_check_significance(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
@@ -777,23 +846,18 @@ def analyze_token_complexity(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame
             # Mann-Whitney U test (two-tailed)
             mw_stat, mw_p = stats.mannwhitneyu(mem_values, other_values, alternative='two-sided')
 
-            # Effect size: Cohen's d
-            pooled_std = np.sqrt(((len(mem_values)-1)*mem_values.std()**2 +
-                                  (len(other_values)-1)*other_values.std()**2) /
-                                 (len(mem_values) + len(other_values) - 2))
-            cohens_d = (mem_values.mean() - other_values.mean()) / pooled_std if pooled_std > 0 else 0
-
-            # Effect size: rank-biserial correlation
+            # Effect sizes
             n1, n2 = len(mem_values), len(other_values)
-            rank_biserial = 1 - (2 * mw_stat) / (n1 * n2)
+            cohens_d = compute_cohens_d(mem_values, other_values)
+            rank_biserial = compute_rank_biserial(mw_stat, n1, n2)
 
             results_rows.append({
                 "metric": metric,
                 "comparison": f"memorized vs {other_cond}",
                 "memorized_mean": mem_values.mean(),
-                "memorized_std": mem_values.std(),
                 "other_mean": other_values.mean(),
-                "other_std": other_values.std(),
+                "memorized_std": np.std(mem_values, ddof=1),
+                "other_std": np.std(other_values, ddof=1),
                 "n_per_group": n1,
                 "t_statistic": t_stat,
                 "t_p_value": t_p,
@@ -812,7 +876,7 @@ def analyze_token_complexity(df: pd.DataFrame, output_dir: Path) -> pd.DataFrame
     complexity_df = df[["condition", "config", "original_top_token", "zipf_frequency", "token_length"]]
     complexity_df.to_csv(complexity_dir / "token_complexity.csv", index=False)
 
-    results_df = pd.DataFrame(results_rows)
+    results_df = apply_bh_correction(pd.DataFrame(results_rows))
     if not results_df.empty:
         results_df.to_csv(complexity_dir / "complexity_significance.csv", index=False)
 
@@ -872,29 +936,20 @@ def analyze_results(output_dir: Path = OUTPUT_DIR):
     token_df.to_csv(output_dir / "token_predictions.csv", index=False)
 
     # Statistical significance analysis
-    pairwise_df, pooled_df = analyze_metric_significance(df, output_dir)
+    sig_results = analyze_metric_significance(df, output_dir)
+    pairwise_df = sig_results["pairwise"]
+    omnibus_df = sig_results["omnibus"]
     print_significant_results(pairwise_df, "Pairwise")
-    print_significant_results(pooled_df, "Pooled")
 
     # Significance effect size visualizations
     exclude_metrics = ["top_k_agreement", "replacement_prob_of_original_top"]
     sig_viz_dir = output_dir / "significance_viz"
     sig_viz_dir.mkdir(parents=True, exist_ok=True)
 
-    # Pooled visualization
-    if not pooled_df.empty:
-        plot_significance_effect_sizes(
-            pooled_df,
-            title="Memorized vs Pooled (Made-up + Random)",
-            save_path=sig_viz_dir / "pooled_effect_sizes.png",
-            exclude_metrics=exclude_metrics,
-        )
-
     # Pairwise visualizations (separate file for each comparison)
     if not pairwise_df.empty:
         for comparison in pairwise_df["comparison"].unique():
             comparison_df = pairwise_df[pairwise_df["comparison"] == comparison]
-            # Create filename-safe version of comparison name
             safe_name = comparison.replace(" ", "_").replace("-", "_")
             plot_significance_effect_sizes(
                 comparison_df,
@@ -902,6 +957,18 @@ def analyze_results(output_dir: Path = OUTPUT_DIR):
                 save_path=sig_viz_dir / f"{safe_name}_effect_sizes.png",
                 exclude_metrics=exclude_metrics,
             )
+
+    # Omnibus (ANOVA/Kruskal-Wallis) visualization
+    if not omnibus_df.empty:
+        plot_omnibus_effect_sizes(
+            omnibus_df,
+            title="Omnibus Tests (ANOVA / Kruskal-Wallis)",
+            save_path=sig_viz_dir / "omnibus_effect_sizes.png",
+            exclude_metrics=exclude_metrics,
+        )
+
+    # Perplexity vs accuracy metrics visualizations
+    plot_perplexity_relationships(df, output_dir, conditions, palette)
 
     # Token complexity analysis
     analyze_token_complexity(df, output_dir)
@@ -946,7 +1013,7 @@ def run_sanity_checks(output_dir: Path = OUTPUT_DIR):
     # Report any unexpected significant results
     sanity_sig = sanity_df[
         (sanity_df["t_significant"]) | (sanity_df["mw_significant"])
-    ][["sanity_check", "metric", "comparison", "t_p_value", "mw_p_value"]]
+        ][["sanity_check", "metric", "comparison", "t_p_value", "mw_p_value"]]
 
     if not sanity_sig.empty:
         print("\nSanity Check - Unexpected Significant Results:")

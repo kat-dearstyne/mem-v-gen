@@ -1103,131 +1103,265 @@ def plot_error_hypothesis_metrics(df: pd.DataFrame,
         )
 
 
+METRIC_LABELS = {
+    "last_token_cosine": "Last Token Cosine",
+    "cumulative_cosine": "Cumulative Cosine",
+    "original_accuracy": "Original Accuracy",
+    "kl_divergence": "KL Divergence",
+    "top_k_agreement": "Top-10 Agreement",
+    "replacement_prob_of_original_top": "Repl. P(Original Top)",
+}
+
+SIG_COLORS = {
+    "both": "#06402B",      # Green - both tests significant
+    "parametric_only": "#96D9C0",    # Light green - parametric only
+    "none": "#bdc3c7",      # Gray - not significant
+}
+
+
+def _prepare_sig_plot_df(df: pd.DataFrame,
+                          exclude_metrics: Optional[List[str]],
+                          parametric_col: str,
+                          nonparametric_col: str) -> pd.DataFrame:
+    """Prepare DataFrame for significance plotting with labels and significance levels."""
+    if exclude_metrics is None:
+        exclude_metrics = []
+
+    plot_df = df[~df["metric"].isin(exclude_metrics)].copy()
+    if plot_df.empty:
+        return plot_df
+
+    plot_df["metric_label"] = plot_df["metric"].map(lambda m: METRIC_LABELS.get(m, m))
+
+    def get_sig_level(row):
+        if row[parametric_col] and row[nonparametric_col]:
+            return "both"
+        elif row[parametric_col]:
+            return "parametric_only"
+        return "none"
+
+    plot_df["sig_level"] = plot_df.apply(get_sig_level, axis=1)
+    return plot_df
+
+
+def _plot_effect_size_bar(ax, plot_df: pd.DataFrame,
+                           effect_col: str,
+                           parametric_col: str,
+                           nonparametric_col: str,
+                           xlabel: str,
+                           title: str,
+                           thresholds: List[tuple]) -> None:
+    """Plot a single effect size horizontal bar chart."""
+    colors = [SIG_COLORS[level] for level in plot_df["sig_level"]]
+    y_pos = range(len(plot_df))
+
+    ax.barh(y_pos, plot_df[effect_col].abs(), color=colors, edgecolor='white', linewidth=0.8)
+
+    # Add significance markers
+    for i, (_, row) in enumerate(plot_df.iterrows()):
+        marker = ""
+        if row[parametric_col] and row[nonparametric_col]:
+            marker = "**"
+        elif row[parametric_col]:
+            marker = "*"
+        x_pos = abs(row[effect_col]) + 0.02
+        ax.text(x_pos, i, marker, va='center', fontsize=12, fontweight='bold')
+
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(plot_df["metric_label"])
+    ax.set_xlabel(xlabel)
+    ax.set_title(title, fontweight='bold')
+
+    # Add threshold lines
+    for val, color in thresholds:
+        ax.axvline(x=val, color=color, linestyle='--', alpha=0.5)
+
+    ax.set_xlim(0, max(plot_df[effect_col].abs().max() * 1.2, thresholds[-1][0] * 1.5))
+    sns.despine(ax=ax, left=True, bottom=True)
+
+
+def _save_sig_figure(fig, save_path: Path, title: str, legend_labels: tuple) -> None:
+    """Add legend and save significance figure."""
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor=SIG_COLORS["both"], label=f'Both tests sig. **'),
+        Patch(facecolor=SIG_COLORS["parametric_only"], label=f'{legend_labels[0]} only sig. *'),
+        Patch(facecolor=SIG_COLORS["none"], label='Not significant'),
+    ]
+    fig.legend(handles=legend_elements, loc='upper center', ncol=3, bbox_to_anchor=(0.5, 0.02))
+    fig.suptitle(title, fontsize=13, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.15)
+    plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
+
+
 def plot_significance_effect_sizes(df: pd.DataFrame,
                                     title: str,
                                     save_path: Path,
                                     exclude_metrics: Optional[List[str]] = None) -> None:
     """
-    Creates a visualization showing significance and effect sizes for metrics.
-
-    Displays a horizontal bar chart with Cohen's d effect sizes, with significance
-    indicated by bar color and asterisks.
+    Plot pairwise significance with Cohen's d and rank-biserial r effect sizes.
 
     Args:
         df: DataFrame with columns: metric, t_significant, mw_significant, cohens_d, rank_biserial_r
         title: Title for the plot
         save_path: Path to save the visualization
-        exclude_metrics: List of metrics to exclude from visualization
+        exclude_metrics: List of metrics to exclude
     """
-    if exclude_metrics is None:
-        exclude_metrics = []
+    plot_df = _prepare_sig_plot_df(df, exclude_metrics, "t_significant", "mw_significant")
+    if plot_df.empty:
+        return
 
-    # Filter out excluded metrics
-    plot_df = df[~df["metric"].isin(exclude_metrics)].copy()
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    _plot_effect_size_bar(axes[0], plot_df, "cohens_d", "t_significant", "mw_significant",
+                          "|Cohen's d|", "Effect Size: Cohen's d",
+                          [(0.2, '#999'), (0.5, '#666'), (0.8, '#333')])
+
+    _plot_effect_size_bar(axes[1], plot_df, "rank_biserial_r", "t_significant", "mw_significant",
+                          "|Rank-biserial r|", "Effect Size: Rank-biserial r",
+                          [(0.1, '#999'), (0.3, '#666'), (0.5, '#333')])
+
+    _save_sig_figure(fig, save_path, title, ("T-test", "MW"))
+
+
+def plot_omnibus_effect_sizes(df: pd.DataFrame,
+                               title: str,
+                               save_path: Path,
+                               exclude_metrics: Optional[List[str]] = None) -> None:
+    """
+    Plot omnibus (ANOVA/Kruskal-Wallis) significance with eta² and epsilon² effect sizes.
+
+    Args:
+        df: DataFrame with columns: metric, anova_significant, kruskal_significant,
+            eta_squared, epsilon_squared
+        title: Title for the plot
+        save_path: Path to save the visualization
+        exclude_metrics: List of metrics to exclude
+    """
+    plot_df = _prepare_sig_plot_df(df, exclude_metrics, "anova_significant", "kruskal_significant")
+    if plot_df.empty:
+        return
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # eta² thresholds: 0.01 small, 0.06 medium, 0.14 large
+    _plot_effect_size_bar(axes[0], plot_df, "eta_squared", "anova_significant", "kruskal_significant",
+                          "η² (eta-squared)", "Effect Size: η² (ANOVA)",
+                          [(0.01, '#999'), (0.06, '#666'), (0.14, '#333')])
+
+    # epsilon² uses similar thresholds
+    _plot_effect_size_bar(axes[1], plot_df, "epsilon_squared", "anova_significant", "kruskal_significant",
+                          "ε² (epsilon-squared)", "Effect Size: ε² (Kruskal-Wallis)",
+                          [(0.01, '#999'), (0.06, '#666'), (0.14, '#333')])
+
+    _save_sig_figure(fig, save_path, title, ("ANOVA", "Kruskal"))
+
+
+def plot_perplexity_relationships(df: pd.DataFrame,
+                                   output_dir: Path,
+                                   conditions: List[str],
+                                   palette: List) -> None:
+    """
+    Creates scatter plots showing relationship between perplexity and accuracy metrics.
+
+    Args:
+        df: DataFrame with perplexity and accuracy metric columns
+        output_dir: Directory to save visualizations
+        conditions: List of condition names
+        palette: Color palette for conditions
+    """
+    perplexity_dir = output_dir / "perplexity"
+    perplexity_dir.mkdir(parents=True, exist_ok=True)
+
+    accuracy_metrics = [
+        ("last_token_cosine", "Last Token Cosine"),
+        ("cumulative_cosine", "Cumulative Cosine"),
+        ("original_accuracy", "Original Accuracy"),
+        ("kl_divergence", "KL Divergence"),
+    ]
+
+    perplexity_metrics = [
+        ("perplexity_last_token", "Perplexity (Last Token)"),
+        ("perplexity_full", "Perplexity (Full Sequence)"),
+    ]
+
+    # Filter out rows with None perplexity
+    plot_df = df.dropna(subset=["perplexity_last_token", "perplexity_full"])
 
     if plot_df.empty:
         return
 
-    # Create readable metric labels
-    metric_labels = {
-        "last_token_cosine": "Last Token Cosine",
-        "cumulative_cosine": "Cumulative Cosine",
-        "original_accuracy": "Original Accuracy",
-        "kl_divergence": "KL Divergence",
-        "top_k_agreement": "Top-10 Agreement",
-        "replacement_prob_of_original_top": "Repl. P(Original Top)",
-    }
-    plot_df["metric_label"] = plot_df["metric"].map(lambda m: metric_labels.get(m, m))
+    condition_colors = {cond: palette[i] for i, cond in enumerate(conditions)}
 
-    # Determine significance level for coloring
-    # Both significant = dark green, t-test only = light green, neither = gray
-    def get_sig_level(row):
-        if row["t_significant"] and row["mw_significant"]:
-            return "both"
-        elif row["t_significant"]:
-            return "t_only"
-        else:
-            return "none"
+    # Create scatter plots for each perplexity metric vs accuracy metrics
+    for ppl_col, ppl_label in perplexity_metrics:
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        axes = axes.flatten()
 
-    plot_df["sig_level"] = plot_df.apply(get_sig_level, axis=1)
+        for i, (acc_col, acc_label) in enumerate(accuracy_metrics):
+            ax = axes[i]
 
-    # Color mapping
-    sig_colors = {
-        "both": "#06402B",      # Green - both tests significant
-        "t_only": "#96D9C0",    # Light green - t-test only
-        "none": "#bdc3c7",      # Gray - not significant
-    }
+            for cond in conditions:
+                cond_df = plot_df[plot_df["condition"] == cond]
+                if cond_df.empty:
+                    continue
+                ax.scatter(
+                    cond_df[ppl_col],
+                    cond_df[acc_col],
+                    c=[condition_colors[cond]],
+                    label=cond,
+                    alpha=0.7,
+                    s=50,
+                )
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+            # Calculate overall correlation
+            corr = plot_df[[ppl_col, acc_col]].corr().iloc[0, 1]
+            ax.set_xlabel(ppl_label)
+            ax.set_ylabel(acc_label)
+            ax.set_title(f"{acc_label} vs {ppl_label}\n(r = {corr:.3f})")
+            ax.legend()
+            sns.despine(ax=ax)
 
-    # Plot Cohen's d
-    ax = axes[0]
-    colors = [sig_colors[level] for level in plot_df["sig_level"]]
-    y_pos = range(len(plot_df))
+        plt.tight_layout()
+        safe_name = ppl_col.replace("perplexity_", "")
+        plt.savefig(perplexity_dir / f"perplexity_{safe_name}_vs_metrics.png",
+                    dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close()
 
-    bars = ax.barh(y_pos, plot_df["cohens_d"].abs(), color=colors, edgecolor='white', linewidth=0.8)
+    # Combined plot: both perplexity metrics side by side for each accuracy metric
+    for acc_col, acc_label in accuracy_metrics:
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    # Add significance markers
-    for i, (_, row) in enumerate(plot_df.iterrows()):
-        marker = ""
-        if row["t_significant"] and row["mw_significant"]:
-            marker = "**"
-        elif row["t_significant"]:
-            marker = "*"
+        for j, (ppl_col, ppl_label) in enumerate(perplexity_metrics):
+            ax = axes[j]
 
-        x_pos = abs(row["cohens_d"]) + 0.02
-        ax.text(x_pos, i, marker, va='center', fontsize=12, fontweight='bold')
+            for cond in conditions:
+                cond_df = plot_df[plot_df["condition"] == cond]
+                if cond_df.empty:
+                    continue
+                ax.scatter(
+                    cond_df[ppl_col],
+                    cond_df[acc_col],
+                    c=[condition_colors[cond]],
+                    label=cond,
+                    alpha=0.7,
+                    s=50,
+                )
 
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(plot_df["metric_label"])
-    ax.set_xlabel("|Cohen's d|")
-    ax.set_title("Effect Size: Cohen's d", fontweight='bold')
-    ax.axvline(x=0.2, color='#999', linestyle='--', alpha=0.5, label='small (0.2)')
-    ax.axvline(x=0.5, color='#666', linestyle='--', alpha=0.5, label='medium (0.5)')
-    ax.axvline(x=0.8, color='#333', linestyle='--', alpha=0.5, label='large (0.8)')
-    ax.set_xlim(0, max(plot_df["cohens_d"].abs().max() * 1.2, 1.2))
-    sns.despine(ax=ax, left=True, bottom=True)
+            corr = plot_df[[ppl_col, acc_col]].corr().iloc[0, 1]
+            ax.set_xlabel(ppl_label)
+            ax.set_ylabel(acc_label)
+            ax.set_title(f"r = {corr:.3f}")
+            ax.legend()
+            sns.despine(ax=ax)
 
-    # Plot Rank-biserial r
-    ax = axes[1]
-    bars = ax.barh(y_pos, plot_df["rank_biserial_r"].abs(), color=colors, edgecolor='white', linewidth=0.8)
-
-    # Add significance markers
-    for i, (_, row) in enumerate(plot_df.iterrows()):
-        marker = ""
-        if row["t_significant"] and row["mw_significant"]:
-            marker = "**"
-        elif row["t_significant"]:
-            marker = "*"
-
-        x_pos = abs(row["rank_biserial_r"]) + 0.02
-        ax.text(x_pos, i, marker, va='center', fontsize=12, fontweight='bold')
-
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(plot_df["metric_label"])
-    ax.set_xlabel("|Rank-biserial r|")
-    ax.set_title("Effect Size: Rank-biserial r", fontweight='bold')
-    ax.axvline(x=0.1, color='#999', linestyle='--', alpha=0.5, label='small (0.1)')
-    ax.axvline(x=0.3, color='#666', linestyle='--', alpha=0.5, label='medium (0.3)')
-    ax.axvline(x=0.5, color='#333', linestyle='--', alpha=0.5, label='large (0.5)')
-    ax.set_xlim(0, max(plot_df["rank_biserial_r"].abs().max() * 1.2, 0.7))
-    sns.despine(ax=ax, left=True, bottom=True)
-
-    # Add legend for significance
-    from matplotlib.patches import Patch
-    legend_elements = [
-        Patch(facecolor=sig_colors["both"], label='Both tests sig. **'),
-        Patch(facecolor=sig_colors["t_only"], label='T-test only sig. *'),
-        Patch(facecolor=sig_colors["none"], label='Not significant'),
-    ]
-    fig.legend(handles=legend_elements, loc='upper center', ncol=3, bbox_to_anchor=(0.5, 0.02))
-
-    fig.suptitle(title, fontsize=13, fontweight='bold', y=1.02)
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.15)
-
-    plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
-    plt.close()
+        fig.suptitle(f"{acc_label} vs Perplexity", fontweight='bold', y=1.02)
+        plt.tight_layout()
+        plt.savefig(perplexity_dir / f"{acc_col}_vs_perplexity.png",
+                    dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close()
 
 
 def plot_token_complexity(df: pd.DataFrame,
