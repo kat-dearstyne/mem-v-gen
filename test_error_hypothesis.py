@@ -311,7 +311,7 @@ def get_per_position_cross_entropy(base_logits_BPV, prompt_tokens, model, memori
 
     Args:
         base_logits_BPV: Base model logits (batch, position, vocab)
-        prompt_tokens: Tokenized prompt (seq_len,)
+        prompt_tokens: Tokenized prompt, either (seq_len,) or (1, seq_len)
         model: The model instance (for tokenizer access)
         memorized_completion: The expected completion string
 

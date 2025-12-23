@@ -1321,10 +1321,10 @@ def plot_per_position_curves(results: dict,
                               conditions: List[str],
                               palette: List) -> None:
     """
-    Plot per-position error and perplexity curves for each prompt.
+    Plot error metrics vs perplexity at each position for each prompt.
 
-    Creates line plots showing how metrics evolve across token positions,
-    with one line per prompt, colored by condition.
+    Creates one plot per prompt (config), showing how error metrics relate to
+    perplexity at each token position, with different conditions overlaid.
 
     Args:
         results: Dictionary structured as {condition: {config_name: metrics_dict}}
@@ -1337,91 +1337,79 @@ def plot_per_position_curves(results: dict,
 
     condition_colors = {cond: palette[i] for i, cond in enumerate(conditions)}
 
-    # Collect all per-position data
-    curve_data = []
+    # Reorganize data by config name
+    configs_data = {}
     for condition, config_metrics in results.items():
         for config_name, metrics in config_metrics.items():
-            curve_data.append({
-                "condition": condition,
-                "config": config_name,
+            if config_name not in configs_data:
+                configs_data[config_name] = {}
+            configs_data[config_name][condition] = {
                 "per_position_cosine": metrics.get("per_position_cosine", []),
                 "per_position_kl": metrics.get("per_position_kl", []),
                 "per_position_argmax_match": metrics.get("per_position_argmax_match", []),
                 "per_position_cross_entropy": metrics.get("per_position_cross_entropy", []),
-            })
+            }
 
-    if not curve_data:
+    if not configs_data:
         return
 
-    metrics_config = [
-        ("per_position_cosine", "Cosine Similarity", "Position", "Cosine Similarity"),
-        ("per_position_kl", "KL Divergence", "Position", "KL Divergence (nats)"),
-        ("per_position_argmax_match", "Argmax Match", "Position", "Match (1=same, 0=different)"),
-        ("per_position_cross_entropy", "Cross-Entropy", "Position", "Cross-Entropy (nats)"),
-    ]
+    # Plot each config (prompt) separately
+    for config_name, cond_data in configs_data.items():
+        safe_name = config_name.replace(" ", "_").replace("/", "_")
 
-    # Plot each metric
-    for metric_key, metric_title, xlabel, ylabel in metrics_config:
-        fig, ax = plt.subplots(figsize=(12, 6))
-
-        for item in curve_data:
-            values = item[metric_key]
-            if not values:
+        for condition in conditions:
+            if condition not in cond_data:
                 continue
 
-            positions = list(range(len(values)))
-            color = condition_colors.get(item["condition"], "gray")
+            cosine_values = cond_data[condition].get("per_position_cosine", [])
+            ce_values = cond_data[condition].get("per_position_cross_entropy", [])
 
-            ax.plot(positions, values,
-                    color=color,
-                    alpha=0.6,
-                    linewidth=1.5,
-                    label=f"{item['condition']}: {item['config']}")
-
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
-        ax.set_title(f"Per-Position {metric_title}", fontweight='bold')
-
-        # Create legend with just conditions
-        handles = [plt.Line2D([0], [0], color=condition_colors[c], linewidth=2, label=c)
-                   for c in conditions if c in condition_colors]
-        ax.legend(handles=handles, title="Condition", loc='best')
-
-        sns.despine(ax=ax)
-        plt.tight_layout()
-        plt.savefig(curves_dir / f"{metric_key}.png", dpi=150, bbox_inches='tight', facecolor='white')
-        plt.close()
-
-    # Combined plot: all error metrics (cosine, KL, argmax) in subplots
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    axes = axes.flatten()
-
-    for ax_idx, (metric_key, metric_title, xlabel, ylabel) in enumerate(metrics_config):
-        ax = axes[ax_idx]
-
-        for item in curve_data:
-            values = item[metric_key]
-            if not values:
+            if not cosine_values or not ce_values:
                 continue
 
-            positions = list(range(len(values)))
-            color = condition_colors.get(item["condition"], "gray")
+            # Convert cross-entropy to perplexity
+            perplexity = [np.exp(v) for v in ce_values]
 
-            ax.plot(positions, values,
-                    color=color,
-                    alpha=0.5,
-                    linewidth=1)
+            # Ensure same length
+            min_len = min(len(cosine_values), len(perplexity))
+            cosine_values = cosine_values[:min_len]
+            perplexity = perplexity[:min_len]
+            positions = list(range(min_len))
 
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
-        ax.set_title(metric_title, fontweight='bold')
-        sns.despine(ax=ax)
+            fig, ax1 = plt.subplots(figsize=(12, 6))
 
-    # Add single legend
-    handles = [plt.Line2D([0], [0], color=condition_colors[c], linewidth=2, label=c)
-               for c in conditions if c in condition_colors]
-    fig.legend(handles=handles, title="Condition", loc='upper right', bbox_to_anchor=(0.99, 0.99))
+            # Plot cosine similarity on left y-axis
+            color1 = '#1f77b4'
+            ax1.plot(positions, cosine_values,
+                     color=color1,
+                     linewidth=2,
+                     marker='o',
+                     markersize=3,
+                     label='Cosine Similarity')
+            ax1.set_xlabel("Position")
+            ax1.set_ylabel("Cosine Similarity", color=color1)
+            ax1.tick_params(axis='y', labelcolor=color1)
 
-    plt.tight_layout()
-    plt.savefig(curves_dir / "combined_per_position.png", dpi=150, bbox_inches='tight', facecolor='white')
-    plt.close()
+            # Plot perplexity on right y-axis
+            ax2 = ax1.twinx()
+            color2 = '#ff7f0e'
+            ax2.plot(positions, perplexity,
+                     color=color2,
+                     linewidth=2,
+                     marker='s',
+                     markersize=3,
+                     label='Perplexity')
+            ax2.set_ylabel("Perplexity", color=color2)
+            ax2.tick_params(axis='y', labelcolor=color2)
+
+            # Combined legend
+            lines1, labels1 = ax1.get_legend_handles_labels()
+            lines2, labels2 = ax2.get_legend_handles_labels()
+            ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
+
+            ax1.set_title(f"{config_name} - {condition}", fontweight='bold')
+            sns.despine(ax=ax1, right=False)
+
+            plt.tight_layout()
+            plt.savefig(curves_dir / f"{safe_name}_{condition}.png", dpi=150, bbox_inches='tight', facecolor='white')
+            plt.close()
