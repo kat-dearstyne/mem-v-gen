@@ -1390,7 +1390,7 @@ def plot_per_position_curves(results: dict,
             ax1.set_ylabel("Cosine Similarity", color=color1)
             ax1.tick_params(axis='y', labelcolor=color1)
 
-            # Plot perplexity on right y-axis
+            # Plot perplexity on right y-axis (log scale)
             ax2 = ax1.twinx()
             color2 = '#ff7f0e'
             ax2.plot(positions, perplexity,
@@ -1399,7 +1399,8 @@ def plot_per_position_curves(results: dict,
                      marker='s',
                      markersize=3,
                      label='Perplexity')
-            ax2.set_ylabel("Perplexity", color=color2)
+            ax2.set_ylabel("Perplexity (log scale)", color=color2)
+            ax2.set_yscale('log')
             ax2.tick_params(axis='y', labelcolor=color2)
 
             # Combined legend
@@ -1411,5 +1412,52 @@ def plot_per_position_curves(results: dict,
             sns.despine(ax=ax1, right=False)
 
             plt.tight_layout()
-            plt.savefig(curves_dir / f"{safe_name}_{condition}.png", dpi=150, bbox_inches='tight', facecolor='white')
+            plt.savefig(curves_dir / f"{safe_name}_{condition}_cosine.png", dpi=150, bbox_inches='tight', facecolor='white')
             plt.close()
+
+            # Plot KL divergence and perplexity
+            kl_values = cond_data[condition].get("per_position_kl", [])
+            if kl_values:
+                min_len_kl = min(len(kl_values), len(perplexity))
+                kl_values = kl_values[:min_len_kl]
+                perplexity_kl = perplexity[:min_len_kl]
+                positions_kl = list(range(min_len_kl))
+
+                fig, ax1 = plt.subplots(figsize=(12, 6))
+
+                # Plot KL divergence on left y-axis (log scale since KL can vary widely)
+                color1 = '#2ca02c'
+                ax1.plot(positions_kl, kl_values,
+                         color=color1,
+                         linewidth=2,
+                         marker='o',
+                         markersize=3,
+                         label='KL Divergence')
+                ax1.set_xlabel("Position")
+                ax1.set_ylabel("KL Divergence", color=color1)
+                ax1.tick_params(axis='y', labelcolor=color1)
+
+                # Plot perplexity on right y-axis (log scale)
+                ax2 = ax1.twinx()
+                color2 = '#ff7f0e'
+                ax2.plot(positions_kl, perplexity_kl,
+                         color=color2,
+                         linewidth=2,
+                         marker='s',
+                         markersize=3,
+                         label='Perplexity')
+                ax2.set_ylabel("Perplexity (log scale)", color=color2)
+                ax2.set_yscale('log')
+                ax2.tick_params(axis='y', labelcolor=color2)
+
+                # Combined legend
+                lines1, labels1 = ax1.get_legend_handles_labels()
+                lines2, labels2 = ax2.get_legend_handles_labels()
+                ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
+
+                ax1.set_title(f"{config_name} - {condition} (KL Divergence)", fontweight='bold')
+                sns.despine(ax=ax1, right=False)
+
+                plt.tight_layout()
+                plt.savefig(curves_dir / f"{safe_name}_{condition}_kl.png", dpi=150, bbox_inches='tight', facecolor='white')
+                plt.close()

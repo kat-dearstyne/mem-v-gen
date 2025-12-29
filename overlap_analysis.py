@@ -6,7 +6,6 @@ from typing import List, Optional
 
 import pandas as pd
 
-from common_utils import user_select_models, user_select_prompt
 from constants import PROMPT_IDS_MEMORIZED, PROMPT_ID_BASELINE, DATA_PATH, MODEL, SUBMODELS, TOP_K, CONFIG_BASE_DIR, \
     OUTPUT_DIR, OVERLAP_ANALYSIS_FILENAME, FEATURE_LAYER, FEATURE_ID
 from error_comparisons import run_error_ranking, analyze_conditions
@@ -289,7 +288,7 @@ def run_for_config(config_dir: Path, config_name: str,
     model, submodel = user_select_models(model=MODEL, submodel=SUBMODELS[submodel_num])
     graph_dir = os.path.join(base_save_path, "graphs")
 
-    prompt = user_select_prompt(prompt_default=main_prompt, graph_dir=graph_dir)
+    prompt = main_prompt
     all_prompts = [prompt] + diff_prompts + sim_prompts
     prompt_ids = PROMPT_IDS_MEMORIZED if len(config_dir.parents) == 1 else PROMPT_ID_BASELINE
     prompt2ids = {p: (prompt_ids[index] if len(prompt_ids) > index else p)

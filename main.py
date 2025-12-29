@@ -5,18 +5,17 @@ from dotenv import load_dotenv
 
 from constants import OUTPUT_DIR
 from overlap_analysis import run_for_all_configs, analyze_overlap
+from utils import get_env_bool, get_env_list, get_env_int
 
 load_dotenv()
 
-
 # ================= Setup Variables ==================
-CONFIG_NAMES = os.getenv("CONFIG_NAME", "").split(",")
+CONFIG_NAMES = get_env_list("CONFIG_NAME")
 CONFIG_DIR = os.getenv("CONFIG_DIR", "")
-RUN_ERROR_ANALYSIS = os.getenv("RUN_ERROR_ANALYSIS", "false").lower() == "true"
-ANALYSIS_DIRS =  os.getenv("ANALYSIS_DIRS", "").split(",")
-RUN_FINAL_ANALYSIS = os.getenv("RUN_FINAL_ANALYSIS", "false").lower() == "true" and ANALYSIS_DIRS
-SUBMODEL_NUM = int(os.getenv("SUBMODEL_NUM", "0"))
-
+RUN_ERROR_ANALYSIS = get_env_bool("RUN_ERROR_ANALYSIS", False)
+ANALYSIS_DIRS = get_env_list("ANALYSIS_DIRS")
+RUN_FINAL_ANALYSIS = get_env_bool("RUN_FINAL_ANALYSIS", False) and ANALYSIS_DIRS
+SUBMODEL_NUM = get_env_int("SUBMODEL_NUM", default=0)
 
 if __name__ == "__main__":
     if RUN_FINAL_ANALYSIS:

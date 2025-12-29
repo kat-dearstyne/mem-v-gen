@@ -2,7 +2,7 @@ import unittest
 import pandas as pd
 from unittest.mock import patch, MagicMock
 from subgraph_comparisons import nodes_not_in, calculate_intersection_metrics, get_links_overlap
-from attribution_graph_utils import get_links_from_node
+from common_utils import get_links_from_node
 
 
 class TestGraphFunctions(unittest.TestCase):

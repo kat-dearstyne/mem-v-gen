@@ -28,9 +28,9 @@ plt.rcParams.update({
     'grid.alpha': 0.3,
 })
 
-from attribution_graph_utils import create_or_load_graph, get_top_output_logit_node, get_output_logits, \
-    get_nodes_linked_to_target, get_node_dict, get_links_from_node
-from common_utils import get_id_without_pos
+from attribution_graph_utils import create_or_load_graph
+from common_utils import get_id_without_pos, get_top_output_logit_node, get_output_logits, get_links_from_node, \
+    get_nodes_linked_to_target, get_node_dict
 
 CONDITION1 = "memorized"
 CONDITION2 = "non-memorized"

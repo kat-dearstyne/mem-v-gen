@@ -8,8 +8,8 @@ import numpy as np
 from scipy import stats
 
 # Load the data
-error_df = pd.read_csv("output/memorized-clt/memorized vs. random/error-results-individual.csv")
-combined_df = pd.read_csv("output/memorized-clt/final/combined_results.csv")
+error_df = pd.read_csv("../output/memorized-clt/memorized vs. random/error-results-individual.csv")
+combined_df = pd.read_csv("../output/memorized-clt/final/combined_results.csv")
 
 # Filter combined_df for "memorized vs rephrased" condition
 rephrased_df = combined_df[combined_df['prompt_type'] == 'memorized vs rephrased'].copy()

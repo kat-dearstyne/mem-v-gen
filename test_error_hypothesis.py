@@ -326,13 +326,20 @@ def get_per_position_cross_entropy(base_logits_BPV, prompt_tokens, model, memori
     completion_tokens = model.tokenizer.encode(memorized_completion, add_special_tokens=False)
     first_completion_token = completion_tokens[0]
 
+    # Ensure prompt_tokens is 1D
+    tokens = prompt_tokens.squeeze() if prompt_tokens.dim() > 1 else prompt_tokens
+
     logits = base_logits_BPV[0].float()  # (seq_len, vocab)
     # Targets: tokens[1:] for prefix, then first_completion_token for last position
-    targets = torch.cat([prompt_tokens[1:], torch.tensor([first_completion_token], device=prompt_tokens.device)])
+    completion_tensor = torch.tensor([first_completion_token], dtype=torch.long, device=tokens.device)
+    targets = torch.cat([tokens[1:].long(), completion_tensor])
+
+    # Sanity check lengths
+    assert logits.shape[0] == targets.shape[0], f"Length mismatch: logits {logits.shape[0]} vs targets {targets.shape[0]}"
 
     ce_per_pos = []
     for i in range(logits.shape[0]):
-        ce = torch.nn.functional.cross_entropy(logits[i].unsqueeze(0), targets[i].unsqueeze(0))
+        ce = torch.nn.functional.cross_entropy(logits[i].unsqueeze(0), targets[i:i+1])
         ce_per_pos.append(ce.item())
 
     return ce_per_pos
