@@ -1,13 +1,15 @@
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict
 
-import matplotlib.pyplot as plt
+from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib import pyplot as plt
 from narwhals import DataFrame
 
-from constants import FEATURE_LAYER, FEATURE_ID, CUSTOM_PALETTE
+from src.constants import FEATURE_LAYER, FEATURE_ID, CUSTOM_PALETTE, COLORS
+from src.utils import get_conditions_from_label
 
 # Set up plot styling
 sns.set_theme(style="whitegrid")
@@ -28,8 +30,30 @@ plt.rcParams.update({
 })
 
 
+def get_palette(n: int) -> List[str]:
+    """
+    Returns a list of n colors from the custom palette, cycling if n exceeds palette size.
+
+    Args:
+        n: Number of colors needed.
+
+    Returns:
+        List of hex color strings.
+    """
+    return [CUSTOM_PALETTE[i % len(CUSTOM_PALETTE)] for i in range(n)]
+
+
 def visualize_feature_presence(df: DataFrame, results_dir: Path):
-    """Visualize feature presence counts by prompt_id."""
+    """
+    Creates a bar chart showing feature presence counts by prompt_id.
+
+    Args:
+        df: DataFrame with prompt_id and feature_present columns.
+        results_dir: Directory to save the visualization.
+
+    Returns:
+        The input DataFrame unchanged.
+    """
 
     # Count True/False for each prompt_id
     counts = df.groupby('prompt_id')['feature_present'].agg(['sum', 'count'])
@@ -65,6 +89,15 @@ def plot_metric_by_condition(df: pd.DataFrame,
                              config_order: Optional[List[str]] = None) -> None:
     """
     Creates a grouped bar chart comparing a metric across conditions for each config.
+
+    Args:
+        df: DataFrame with config_name, prompt_type, and metric columns.
+        metric_col: Column name for the metric to plot.
+        title: Plot title.
+        ylabel: Y-axis label.
+        save_path: Optional path to save the figure.
+        condition_order: Optional ordering for conditions.
+        config_order: Optional ordering for configs.
     """
     if condition_order is None:
         condition_order = df['prompt_type'].unique().tolist()
@@ -82,7 +115,7 @@ def plot_metric_by_condition(df: pd.DataFrame,
     n_conditions = len(condition_order)
     width = 0.8 / n_conditions
 
-    palette = CUSTOM_PALETTE[:n_conditions]
+    palette = get_palette(n_conditions)
 
     for i, condition in enumerate(condition_order):
         offset = (i - n_conditions / 2 + 0.5) * width
@@ -113,7 +146,14 @@ def plot_jaccard_by_condition(df: pd.DataFrame,
                               condition_order: Optional[List[str]] = None,
                               config_order: Optional[List[str]] = None) -> None:
     """
-    Creates a grouped bar chart comparing Jaccard index across conditions for each config.
+    Creates a grouped bar chart comparing Jaccard index across conditions.
+
+    Args:
+        df: DataFrame with jaccard_index, config_name, and prompt_type columns.
+        title: Plot title.
+        save_path: Optional path to save the figure.
+        condition_order: Optional ordering for conditions.
+        config_order: Optional ordering for configs.
     """
     plot_metric_by_condition(df, metric_col='jaccard_index', title=title,
                              ylabel='Jaccard Index', save_path=save_path,
@@ -129,6 +169,15 @@ def plot_metric_heatmap(df: pd.DataFrame,
                         config_order: Optional[List[str]] = None) -> None:
     """
     Creates a heatmap of metric values across configs and conditions.
+
+    Args:
+        df: DataFrame with config_name, prompt_type, and metric columns.
+        metric_col: Column name for the metric to plot.
+        title: Plot title.
+        cbar_label: Colorbar label.
+        save_path: Optional path to save the figure.
+        condition_order: Optional ordering for conditions.
+        config_order: Optional ordering for configs.
     """
     if condition_order is None:
         condition_order = df['prompt_type'].unique().tolist()
@@ -168,6 +217,13 @@ def plot_jaccard_heatmap(df: pd.DataFrame,
                          config_order: Optional[List[str]] = None) -> None:
     """
     Creates a heatmap of Jaccard index values across configs and conditions.
+
+    Args:
+        df: DataFrame with jaccard_index, config_name, and prompt_type columns.
+        title: Plot title.
+        save_path: Optional path to save the figure.
+        condition_order: Optional ordering for conditions.
+        config_order: Optional ordering for configs.
     """
     plot_metric_heatmap(df, metric_col='jaccard_index', title=title,
                         cbar_label='Jaccard Index', save_path=save_path,
@@ -182,17 +238,25 @@ def plot_metric_boxplot(df: pd.DataFrame,
                         condition_order: Optional[List[str]] = None) -> None:
     """
     Creates a boxplot comparing metric distributions across conditions.
+
+    Args:
+        df: DataFrame with prompt_type and metric columns.
+        metric_col: Column name for the metric to plot.
+        title: Plot title.
+        ylabel: Y-axis label.
+        save_path: Optional path to save the figure.
+        condition_order: Optional ordering for conditions.
     """
     if condition_order is None:
         condition_order = df['prompt_type'].unique().tolist()
 
     fig, ax = plt.subplots(figsize=(8, 5))
 
-    palette = CUSTOM_PALETTE[:len(condition_order)]
+    palette = get_palette(len(condition_order))
 
-    sns.boxplot(x='prompt_type', y=metric_col, data=df,
-                order=condition_order, palette=palette, width=0.5,
-                linewidth=1.5, fliersize=0, ax=ax)
+    sns.boxplot(x='prompt_type', y=metric_col, data=df, hue='prompt_type',
+                order=condition_order, hue_order=condition_order, palette=palette,
+                width=0.5, linewidth=1.5, fliersize=0, legend=False, ax=ax)
     sns.stripplot(x='prompt_type', y=metric_col, data=df,
                   order=condition_order, color='#333333', alpha=0.6,
                   size=6, jitter=0.15, ax=ax)
@@ -200,7 +264,7 @@ def plot_metric_boxplot(df: pd.DataFrame,
     ax.set_title(title, pad=15)
     ax.set_xlabel('Condition', labelpad=10)
     ax.set_ylabel(ylabel, labelpad=10)
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+    ax.tick_params(axis='x', rotation=45)
 
     sns.despine(left=True, bottom=True)
     plt.tight_layout()
@@ -218,6 +282,12 @@ def plot_jaccard_boxplot(df: pd.DataFrame,
                          condition_order: Optional[List[str]] = None) -> None:
     """
     Creates a boxplot comparing Jaccard index distributions across conditions.
+
+    Args:
+        df: DataFrame with jaccard_index and prompt_type columns.
+        title: Plot title.
+        save_path: Optional path to save the figure.
+        condition_order: Optional ordering for conditions.
     """
     plot_metric_boxplot(df, metric_col='jaccard_index', title=title,
                         ylabel='Jaccard Index', save_path=save_path,
@@ -236,8 +306,14 @@ def plot_metric_line(df: pd.DataFrame,
     Creates a line plot showing metric trends across configs for each condition.
 
     Args:
-        extra_series: Optional dict with 'label' and 'data' (pd.Series indexed by config_name)
-                      to plot an additional line on the chart.
+        df: DataFrame with config_name, prompt_type, and metric columns.
+        metric_col: Column name for the metric to plot.
+        title: Plot title.
+        ylabel: Y-axis label.
+        save_path: Optional path to save the figure.
+        condition_order: Optional ordering for conditions.
+        config_order: Optional ordering for configs.
+        extra_series: Optional dict with 'label' and 'data' keys for additional line.
     """
     if condition_order is None:
         condition_order = df['prompt_type'].unique().tolist()
@@ -246,7 +322,7 @@ def plot_metric_line(df: pd.DataFrame,
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    palette = CUSTOM_PALETTE[:len(condition_order)]
+    palette = get_palette(len(condition_order))
 
     for i, condition in enumerate(condition_order):
         cond_df = df[df['prompt_type'] == condition].set_index('config_name')
@@ -311,7 +387,7 @@ def plot_metric_vs_probability_scatter(df: pd.DataFrame,
 
     fig, ax = plt.subplots(figsize=(9, 6))
 
-    palette = CUSTOM_PALETTE[:len(condition_order)]
+    palette = get_palette(len(condition_order))
 
     for i, condition in enumerate(condition_order):
         cond_df = df[df['prompt_type'] == condition]
@@ -352,7 +428,7 @@ def plot_metric_vs_probability_combined(df: pd.DataFrame,
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    palette = CUSTOM_PALETTE[:len(condition_order)]
+    palette = get_palette(len(condition_order))
 
     for ax, metric_col, xlabel in zip(axes, ['jaccard_index', 'relative_jaccard'],
                                       ['Jaccard Index', 'Weighted Jaccard']):
@@ -447,7 +523,7 @@ def plot_combined_metrics(df: pd.DataFrame,
     if config_order is None:
         config_order = sorted(df['config_name'].unique().tolist())
 
-    palette = CUSTOM_PALETTE[:len(condition_order)]
+    palette = get_palette(len(condition_order))
 
     # Line plot for unique_frac by condition
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -564,8 +640,9 @@ def plot_combined_boxplot(df: pd.DataFrame,
 
     # Unique fraction boxplot
     ax = axes[0]
-    sns.boxplot(data=df, x='prompt_type', y='unique_frac', order=condition_order,
-                palette=CUSTOM_PALETTE[:len(condition_order)], ax=ax)
+    sns.boxplot(data=df, x='prompt_type', y='unique_frac', hue='prompt_type',
+                order=condition_order, hue_order=condition_order,
+                palette=get_palette(len(condition_order)), legend=False, ax=ax)
     ax.set_title('Unique Feature Fraction by Condition', pad=15)
     ax.set_xlabel('Condition', labelpad=10)
     ax.set_ylabel('Fraction Unique to Main', labelpad=10)
@@ -574,8 +651,9 @@ def plot_combined_boxplot(df: pd.DataFrame,
 
     # Shared fraction boxplot
     ax = axes[1]
-    sns.boxplot(data=df, x='prompt_type', y='shared_frac', order=condition_order,
-                palette=CUSTOM_PALETTE[:len(condition_order)], ax=ax)
+    sns.boxplot(data=df, x='prompt_type', y='shared_frac', hue='prompt_type',
+                order=condition_order, hue_order=condition_order,
+                palette=get_palette(len(condition_order)), legend=False, ax=ax)
     ax.set_title('Shared Feature Fraction by Condition', pad=15)
     ax.set_xlabel('Condition', labelpad=10)
     ax.set_ylabel('Fraction Shared Among All', labelpad=10)
@@ -611,10 +689,11 @@ def plot_combined_bar(df: pd.DataFrame,
     pivot_df = pivot_df.reindex(config_order)[condition_order]
     x = np.arange(len(config_order))
     width = 0.8 / len(condition_order)
+    palette = get_palette(len(condition_order))
     for i, condition in enumerate(condition_order):
         offset = (i - len(condition_order)/2 + 0.5) * width
         ax.bar(x + offset, pivot_df[condition], width,
-               label=condition, color=CUSTOM_PALETTE[i])
+               label=condition, color=palette[i])
     ax.set_title('Unique Feature Fraction by Config', pad=15)
     ax.set_xlabel('Config', labelpad=10)
     ax.set_ylabel('Fraction', labelpad=10)
@@ -631,7 +710,7 @@ def plot_combined_bar(df: pd.DataFrame,
     for i, condition in enumerate(condition_order):
         offset = (i - len(condition_order)/2 + 0.5) * width
         ax.bar(x + offset, pivot_df[condition], width,
-               label=condition, color=CUSTOM_PALETTE[i])
+               label=condition, color=palette[i])
     ax.set_title('Shared Feature Fraction by Config', pad=15)
     ax.set_xlabel('Config', labelpad=10)
     ax.set_ylabel('Fraction', labelpad=10)
@@ -706,7 +785,7 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
     if config_order is None:
         config_order = sorted(df['config_name'].unique().tolist())
 
-    palette = CUSTOM_PALETTE[:len(condition_order)]
+    palette = get_palette(len(condition_order))
     thresholds = [50, 75, 100]
     threshold_cols = ['count_at_50pct', 'count_at_75pct', 'count_at_100pct']
     line_styles = ['-', '--', '-.', ':']
@@ -835,8 +914,9 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
 
     if not boxplot_df.empty:
         fig, ax = plt.subplots(figsize=(10, 6))
-        sns.boxplot(data=boxplot_df, x='prompt_type', y='shared_present', order=condition_order,
-                    palette=palette, ax=ax)
+        sns.boxplot(data=boxplot_df, x='prompt_type', y='shared_present', hue='prompt_type',
+                    order=condition_order, hue_order=condition_order,
+                    palette=palette, legend=False, ax=ax)
         sns.stripplot(data=boxplot_df, x='prompt_type', y='shared_present', order=condition_order,
                       color='#333333', alpha=0.4, size=4, jitter=0.2, ax=ax)
         ax.set_title('Shared Features Present per Prompt', pad=15)
@@ -972,14 +1052,15 @@ def plot_error_hypothesis_boxplot(df: pd.DataFrame,
     ylabel = "Score" if is_bounded else "KL Divergence (nats)"
 
     fig, ax = plt.subplots(figsize=(5, 4))
-    sns.boxplot(data=df, x="condition", y=metric, order=conditions,
-                palette=palette, ax=ax)
+    sns.boxplot(data=df, x="condition", y=metric, hue="condition",
+                order=conditions, hue_order=conditions,
+                palette=palette, legend=False, ax=ax)
     sns.stripplot(data=df, x="condition", y=metric, order=conditions,
                   color='black', alpha=0.5, size=4, ax=ax)
     ax.set_title(title, fontweight='bold')
     ax.set_xlabel("Condition")
     ax.set_ylabel(ylabel)
-    ax.set_xticklabels(conditions, rotation=45, ha='right')
+    ax.tick_params(axis='x', rotation=45)
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -1014,7 +1095,6 @@ def plot_error_hypothesis_heatmap(df: pd.DataFrame,
 
 def plot_error_hypothesis_combined_boxplot(df: pd.DataFrame,
                                             conditions: List[str],
-                                            palette: List,
                                             save_path: Path,
                                             metrics: Optional[List[str]] = None,
                                             titles: Optional[List[str]] = None) -> None:
@@ -1024,7 +1104,6 @@ def plot_error_hypothesis_combined_boxplot(df: pd.DataFrame,
     Args:
         df: DataFrame with columns: condition and metric columns
         conditions: List of condition names
-        palette: Color palette for conditions
         save_path: Path to save the figure
         metrics: List of metric column names (default: 4 main metrics)
         titles: List of titles for each subplot (default: formatted metric names)
@@ -1034,7 +1113,7 @@ def plot_error_hypothesis_combined_boxplot(df: pd.DataFrame,
     if titles is None:
         titles = ["Last Token Cosine", "Cumulative Cosine", "Original Accuracy", "KL Divergence"]
 
-    n_metrics = len(metrics)
+    palette = get_palette(len(conditions))
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
     axes = axes.flatten()
 
@@ -1043,14 +1122,15 @@ def plot_error_hypothesis_combined_boxplot(df: pd.DataFrame,
         is_bounded = metric != "kl_divergence"
         ylabel = "Score" if is_bounded else "KL Divergence (nats)"
 
-        sns.boxplot(data=df, x="condition", y=metric, order=conditions,
-                    palette=palette, ax=ax)
+        sns.boxplot(data=df, x="condition", y=metric, hue="condition",
+                    order=conditions, hue_order=conditions,
+                    palette=palette, legend=False, ax=ax)
         sns.stripplot(data=df, x="condition", y=metric, order=conditions,
                       color='black', alpha=0.5, size=3, ax=ax)
         ax.set_title(title, fontweight='bold', fontsize=11)
         ax.set_xlabel("")
         ax.set_ylabel(ylabel, fontsize=9)
-        ax.set_xticklabels(conditions, rotation=45, ha='right', fontsize=9)
+        ax.tick_params(axis='x', rotation=45, labelsize=9)
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
@@ -1069,7 +1149,7 @@ def plot_error_hypothesis_metrics(df: pd.DataFrame,
         top_k: Number for top-k agreement metric label
     """
     conditions = df["condition"].unique().tolist()
-    palette = sns.color_palette("husl", len(conditions))
+    palette = get_palette(len(conditions))
 
     # All metrics with their display titles
     all_metrics = ["last_token_cosine", "cumulative_cosine", "original_accuracy",
@@ -1263,8 +1343,7 @@ def plot_omnibus_effect_sizes(df: pd.DataFrame,
 
 def plot_token_complexity(df: pd.DataFrame,
                           output_dir: Path,
-                          conditions: List[str],
-                          palette: List) -> None:
+                          conditions: List[str]) -> None:
     """
     Creates visualizations for token complexity analysis.
 
@@ -1272,11 +1351,11 @@ def plot_token_complexity(df: pd.DataFrame,
         df: DataFrame with columns: condition, zipf_frequency, token_length
         output_dir: Directory to save visualizations (token_complexity subdir will be created)
         conditions: List of condition names
-        palette: Color palette for conditions
     """
     complexity_dir = output_dir / "token_complexity"
     complexity_dir.mkdir(parents=True, exist_ok=True)
 
+    palette = get_palette(len(conditions))
     complexity_metrics = ["zipf_frequency", "token_length"]
     complexity_titles = ["Zipf Frequency (higher=more common)", "Token Length"]
 
@@ -1302,14 +1381,15 @@ def plot_token_complexity(df: pd.DataFrame,
 
         # Boxplot
         fig, ax = plt.subplots(figsize=(8, 6))
-        sns.boxplot(data=df, x="condition", y=metric, order=conditions,
-                    palette=palette, ax=ax)
+        sns.boxplot(data=df, x="condition", y=metric, hue="condition",
+                    order=conditions, hue_order=conditions,
+                    palette=palette, legend=False, ax=ax)
         sns.stripplot(data=df, x="condition", y=metric, order=conditions,
                       color='black', alpha=0.5, size=4, ax=ax)
         ax.set_title(f"Token Complexity: {title}", fontweight='bold')
         ax.set_xlabel("Condition")
         ax.set_ylabel(title)
-        ax.set_xticklabels(conditions, rotation=45, ha='right')
+        ax.tick_params(axis='x', rotation=45)
 
         plt.tight_layout()
         plt.savefig(complexity_dir / f"{metric}_boxplot.png", dpi=150, bbox_inches='tight')
@@ -1318,8 +1398,7 @@ def plot_token_complexity(df: pd.DataFrame,
 
 def plot_per_position_curves(results: dict,
                               output_dir: Path,
-                              conditions: List[str],
-                              palette: List) -> None:
+                              conditions: List[str]) -> None:
     """
     Plot error metrics vs perplexity at each position for each prompt.
 
@@ -1327,22 +1406,21 @@ def plot_per_position_curves(results: dict,
     perplexity at each token position, with different conditions overlaid.
 
     Args:
-        results: Dictionary structured as {condition: {config_name: metrics_dict}}
+        results: Dictionary structured as {config_name: {condition: metrics_dict}}
         output_dir: Directory to save visualizations
         conditions: List of condition names
-        palette: Color palette for conditions
     """
     curves_dir = output_dir / "per_position_curves"
     curves_dir.mkdir(parents=True, exist_ok=True)
 
+    palette = get_palette(len(conditions))
     condition_colors = {cond: palette[i] for i, cond in enumerate(conditions)}
 
-    # Reorganize data by config name
+    # Build configs_data from results
     configs_data = {}
-    for condition, config_metrics in results.items():
-        for config_name, metrics in config_metrics.items():
-            if config_name not in configs_data:
-                configs_data[config_name] = {}
+    for config_name, condition_metrics in results.items():
+        configs_data[config_name] = {}
+        for condition, metrics in condition_metrics.items():
             configs_data[config_name][condition] = {
                 "per_position_cosine": metrics.get("per_position_cosine", []),
                 "per_position_kl": metrics.get("per_position_kl", []),
@@ -1353,47 +1431,99 @@ def plot_per_position_curves(results: dict,
     if not configs_data:
         return
 
+    # Build list of all (config, condition) pairs to process
+    pairs_to_process = [
+        (config_name, condition)
+        for config_name in configs_data
+        for condition in conditions
+        if condition in configs_data[config_name]
+    ]
+
     # Plot each config (prompt) separately
-    for config_name, cond_data in configs_data.items():
+    for config_name, condition in tqdm(pairs_to_process, desc="Plotting per-position curves"):
+        cond_data = configs_data[config_name]
         safe_name = config_name.replace(" ", "_").replace("/", "_")
 
-        for condition in conditions:
-            if condition not in cond_data:
-                continue
+        cosine_values = cond_data[condition].get("per_position_cosine", [])
+        ce_values = cond_data[condition].get("per_position_cross_entropy", [])
 
-            cosine_values = cond_data[condition].get("per_position_cosine", [])
-            ce_values = cond_data[condition].get("per_position_cross_entropy", [])
+        if not cosine_values or not ce_values:
+            continue
 
-            if not cosine_values or not ce_values:
-                continue
+        # Convert cross-entropy to perplexity
+        perplexity = [np.exp(v) for v in ce_values]
 
-            # Convert cross-entropy to perplexity
-            perplexity = [np.exp(v) for v in ce_values]
+        # Ensure same length
+        min_len = min(len(cosine_values), len(perplexity))
+        cosine_values = cosine_values[:min_len]
+        perplexity = perplexity[:min_len]
+        positions = list(range(min_len))
 
-            # Ensure same length
-            min_len = min(len(cosine_values), len(perplexity))
-            cosine_values = cosine_values[:min_len]
-            perplexity = perplexity[:min_len]
-            positions = list(range(min_len))
+        fig, ax1 = plt.subplots(figsize=(12, 6))
+
+        # Plot cosine similarity on left y-axis
+        color1 = '#1f77b4'
+        ax1.plot(positions, cosine_values,
+                 color=color1,
+                 linewidth=2,
+                 marker='o',
+                 markersize=3,
+                 label='Cosine Similarity')
+        ax1.set_xlabel("Position")
+        ax1.set_ylabel("Cosine Similarity", color=color1)
+        ax1.tick_params(axis='y', labelcolor=color1)
+
+        # Plot perplexity on right y-axis (log scale)
+        ax2 = ax1.twinx()
+        color2 = '#ff7f0e'
+        ax2.plot(positions, perplexity,
+                 color=color2,
+                 linewidth=2,
+                 marker='s',
+                 markersize=3,
+                 label='Perplexity')
+        ax2.set_ylabel("Perplexity (log scale)", color=color2)
+        ax2.set_yscale('log')
+        ax2.tick_params(axis='y', labelcolor=color2)
+
+        # Combined legend
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
+
+        ax1.set_title(f"{config_name} - {condition}", fontweight='bold')
+        sns.despine(ax=ax1, right=False)
+
+        plt.tight_layout()
+        plt.savefig(curves_dir / f"{safe_name}_{condition}_cosine.png", dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close()
+
+        # Plot KL divergence and perplexity
+        kl_values = cond_data[condition].get("per_position_kl", [])
+        if kl_values:
+            min_len_kl = min(len(kl_values), len(perplexity))
+            kl_values = kl_values[:min_len_kl]
+            perplexity_kl = perplexity[:min_len_kl]
+            positions_kl = list(range(min_len_kl))
 
             fig, ax1 = plt.subplots(figsize=(12, 6))
 
-            # Plot cosine similarity on left y-axis
-            color1 = '#1f77b4'
-            ax1.plot(positions, cosine_values,
+            # Plot KL divergence on left y-axis (log scale since KL can vary widely)
+            color1 = '#2ca02c'
+            ax1.plot(positions_kl, kl_values,
                      color=color1,
                      linewidth=2,
                      marker='o',
                      markersize=3,
-                     label='Cosine Similarity')
+                     label='KL Divergence')
             ax1.set_xlabel("Position")
-            ax1.set_ylabel("Cosine Similarity", color=color1)
+            ax1.set_ylabel("KL Divergence", color=color1)
             ax1.tick_params(axis='y', labelcolor=color1)
 
             # Plot perplexity on right y-axis (log scale)
             ax2 = ax1.twinx()
             color2 = '#ff7f0e'
-            ax2.plot(positions, perplexity,
+            ax2.plot(positions_kl, perplexity_kl,
                      color=color2,
                      linewidth=2,
                      marker='s',
@@ -1408,56 +1538,103 @@ def plot_per_position_curves(results: dict,
             lines2, labels2 = ax2.get_legend_handles_labels()
             ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
 
-            ax1.set_title(f"{config_name} - {condition}", fontweight='bold')
+            ax1.set_title(f"{config_name} - {condition} (KL Divergence)", fontweight='bold')
             sns.despine(ax=ax1, right=False)
 
             plt.tight_layout()
-            plt.savefig(curves_dir / f"{safe_name}_{condition}_cosine.png", dpi=150, bbox_inches='tight', facecolor='white')
+            plt.savefig(curves_dir / f"{safe_name}_{condition}_kl.png", dpi=150, bbox_inches='tight', facecolor='white')
             plt.close()
 
-            # Plot KL divergence and perplexity
-            kl_values = cond_data[condition].get("per_position_kl", [])
-            if kl_values:
-                min_len_kl = min(len(kl_values), len(perplexity))
-                kl_values = kl_values[:min_len_kl]
-                perplexity_kl = perplexity[:min_len_kl]
-                positions_kl = list(range(min_len_kl))
 
-                fig, ax1 = plt.subplots(figsize=(12, 6))
+def plot_delta_distribution(delta_values: List[float], title: str, label: str,
+                            save_path: Optional[Path] = None) -> None:
+    """
+    Creates a histogram plot showing the distribution of delta values.
+    Visualizes the density distribution of metric differences between two conditions.
 
-                # Plot KL divergence on left y-axis (log scale since KL can vary widely)
-                color1 = '#2ca02c'
-                ax1.plot(positions_kl, kl_values,
-                         color=color1,
-                         linewidth=2,
-                         marker='o',
-                         markersize=3,
-                         label='KL Divergence')
-                ax1.set_xlabel("Position")
-                ax1.set_ylabel("KL Divergence", color=color1)
-                ax1.tick_params(axis='y', labelcolor=color1)
+    Args:
+        delta_values: List of delta values to plot.
+        title: Plot title.
+        label: Comparison label in format 'condition1 vs. condition2'.
+        save_path: Optional path to save the figure.
+    """
+    fig, ax = plt.subplots(figsize=(8, 5))
 
-                # Plot perplexity on right y-axis (log scale)
-                ax2 = ax1.twinx()
-                color2 = '#ff7f0e'
-                ax2.plot(positions_kl, perplexity_kl,
-                         color=color2,
-                         linewidth=2,
-                         marker='s',
-                         markersize=3,
-                         label='Perplexity')
-                ax2.set_ylabel("Perplexity (log scale)", color=color2)
-                ax2.set_yscale('log')
-                ax2.tick_params(axis='y', labelcolor=color2)
+    # Create histogram with KDE overlay
+    sns.histplot(delta_values, bins=15, kde=True, color=COLORS['turquoise'], alpha=0.7,
+                 edgecolor='white', linewidth=0.8, ax=ax)
 
-                # Combined legend
-                lines1, labels1 = ax1.get_legend_handles_labels()
-                lines2, labels2 = ax2.get_legend_handles_labels()
-                ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
+    # Add vertical line at zero for reference
+    ax.axvline(x=0, color='#555555', linestyle='--', linewidth=1.5, alpha=0.7, label='No difference')
 
-                ax1.set_title(f"{config_name} - {condition} (KL Divergence)", fontweight='bold')
-                sns.despine(ax=ax1, right=False)
+    # Add mean line
+    mean_val = np.mean(delta_values)
+    ax.axvline(x=mean_val, color=COLORS['pastel_orange'], linestyle='-',
+               linewidth=2, alpha=0.9, label=f'Mean: {mean_val:.3f}')
 
-                plt.tight_layout()
-                plt.savefig(curves_dir / f"{safe_name}_{condition}_kl.png", dpi=150, bbox_inches='tight', facecolor='white')
-                plt.close()
+    comparisons = get_conditions_from_label(label)
+    ax.set_title(title, pad=15)
+    ax.set_xlabel(f"Δ ({comparisons[0]} - {comparisons[1]})", labelpad=10)
+    ax.set_ylabel("Density", labelpad=10)
+    ax.legend(frameon=True, fancybox=True, shadow=True, fontsize=9)
+
+    sns.despine(left=True, bottom=True)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close()
+    else:
+        plt.show()
+
+
+def boxplot_metric_family(metric_dict: Dict[int, List[float]], title_prefix: str, label: str,
+                          save_path: Optional[Path] = None) -> None:
+    """
+    Creates boxplot visualizations for a group of related metrics across different K values.
+    Useful for visualizing NDCG@k or top-k error proportion across different k values.
+
+    Args:
+        metric_dict: Dictionary mapping K values to lists of delta values.
+        title_prefix: Prefix for the plot title.
+        label: Comparison label in format 'condition1 vs. condition2'.
+        save_path: Optional path to save the figure.
+    """
+    ks = sorted(metric_dict.keys())
+
+    # Prepare data in long format for seaborn
+    plot_data = []
+    for k in ks:
+        for val in metric_dict[k]:
+            plot_data.append({'K': f'K={k}', 'Delta': val})
+    df = pd.DataFrame(plot_data)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    # Create boxplot with strip plot overlay
+    n_k_values = df['K'].nunique()
+    k_order = df['K'].unique().tolist()
+    sns.boxplot(x='K', y='Delta', data=df, hue='K',
+                order=k_order, hue_order=k_order,
+                palette=get_palette(n_k_values), width=0.5,
+                linewidth=1.5, fliersize=0, legend=False, ax=ax)
+    sns.stripplot(x='K', y='Delta', data=df, color='#333333', alpha=0.5,
+                  size=4, jitter=0.15, ax=ax)
+
+    # Add horizontal line at zero
+    ax.axhline(y=0, color='#555555', linestyle='--', linewidth=1.5, alpha=0.7)
+
+    ax.set_title(f"{title_prefix}: Δ Distributions", pad=15)
+    ax.set_xlabel("Top-K Value", labelpad=10)
+    comparisons = get_conditions_from_label(label)
+    ax.set_ylabel(f"Δ ({comparisons[0]} - {comparisons[1]})", labelpad=10)
+    ax.tick_params(axis='x', rotation=45)
+
+    sns.despine(left=True, bottom=True)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close()
+    else:
+        plt.show()

@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from dotenv import load_dotenv
 
-from constants import OUTPUT_DIR, CONFIG_BASE_DIR, FEATURE_LAYER, FEATURE_ID, PROMPT_IDS_MEMORIZED
+from src.constants import OUTPUT_DIR, CONFIG_BASE_DIR, FEATURE_LAYER, FEATURE_ID, PROMPT_IDS_MEMORIZED
 from visualizations import visualize_feature_presence
 
 load_dotenv()

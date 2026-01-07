@@ -2,7 +2,7 @@ import json
 import random
 from pathlib import Path
 
-from constants import CONFIG_BASE_DIR
+from src.constants import CONFIG_BASE_DIR
 
 
 def create_memorized_and_nonmemorized_configs():

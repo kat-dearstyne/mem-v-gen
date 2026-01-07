@@ -1,8 +1,8 @@
 import unittest
 import pandas as pd
 from unittest.mock import patch, MagicMock
-from subgraph_comparisons import nodes_not_in, calculate_intersection_metrics, get_links_overlap
-from common_utils import get_links_from_node
+from src.graph_analyzer import GraphAnalyzer, ComparisonMetrics
+from src.graph_manager import GraphManager
 
 
 class TestGraphFunctions(unittest.TestCase):
@@ -16,7 +16,7 @@ class TestGraphFunctions(unittest.TestCase):
                 "slug": "test-graph-1",
                 "scan": "gemma-2-2b",
                 "prompt": "<bos>THE SOFTWARE IS PROVIDED AS IS",
-                "info": {"url": "https://www.neuronpedia.org/gemma-2-2b/graph?slug=test1"}
+                "info": {"url": "https://www.neuronpedia.org/gemma-2-2b/graph?slug=test1"},
             },
             "nodes": [
                 {
@@ -314,9 +314,14 @@ class TestGraphFunctions(unittest.TestCase):
             ]
         }
 
+        # Create GraphManager instances
+        self.graph1 = GraphManager(self.graph_metadata1)
+        self.graph2 = GraphManager(self.graph_metadata2)
+        self.graph3 = GraphManager(self.graph_metadata3)
+
     def test_get_links_from_node_default_starting_node(self):
         """Test get_links_from_node with default starting node (top output logit)."""
-        links = get_links_from_node(self.graph_metadata1)
+        links = self.graph1.get_links_from_node()
 
         # Should get all links in the chain from output logit back to embedding
         self.assertEqual(len(links), 5)
@@ -331,8 +336,8 @@ class TestGraphFunctions(unittest.TestCase):
 
     def test_get_links_from_node_custom_starting_node(self):
         """Test get_links_from_node with a custom starting node."""
-        starting_node = self.graph_metadata1['nodes'][2]  # layer 2 node
-        links = get_links_from_node(self.graph_metadata1, starting_node=starting_node)
+        starting_node = self.graph1.nodes[2]  # layer 2 node
+        links = self.graph1.get_links_from_node(starting_node=starting_node)
 
         # Should get links from layer 2 node backwards
         self.assertGreater(len(links), 0)
@@ -344,14 +349,14 @@ class TestGraphFunctions(unittest.TestCase):
     def test_get_links_from_node_positive_only(self):
         """Test get_links_from_node filters out negative weights when positive_only=True."""
         # Add a negative weight link to graph
-        self.graph_metadata1['links'].append({
+        self.graph1.links.append({
             "source": "0_1000_1",
             "target": "logit_5000_1",
             "weight": -2.0
         })
 
-        links_positive_only = get_links_from_node(self.graph_metadata1, positive_only=True)
-        links_all = get_links_from_node(self.graph_metadata1, positive_only=False)
+        links_positive_only = self.graph1.get_links_from_node(positive_only=True)
+        links_all = self.graph1.get_links_from_node(positive_only=False)
 
         # Positive only should exclude the negative link
         self.assertEqual(len(links_all), len(links_positive_only) + 1)
@@ -362,9 +367,9 @@ class TestGraphFunctions(unittest.TestCase):
 
     def test_get_links_from_node_with_hops_limit(self):
         """Test get_links_from_node respects hops parameter."""
-        links_1_hop = get_links_from_node(self.graph_metadata1, hops=1)
-        links_2_hops = get_links_from_node(self.graph_metadata1, hops=2)
-        links_all = get_links_from_node(self.graph_metadata1)
+        links_1_hop = self.graph1.get_links_from_node(hops=1)
+        links_2_hops = self.graph1.get_links_from_node(hops=2)
+        links_all = self.graph1.get_links_from_node()
 
         # More hops should include more or equal links
         self.assertLessEqual(len(links_1_hop), len(links_2_hops))
@@ -372,13 +377,13 @@ class TestGraphFunctions(unittest.TestCase):
 
     def test_get_links_from_node_include_features_only(self):
         """Test get_links_from_node with include_features_only=True."""
-        links = get_links_from_node(self.graph_metadata1, include_features_only=True)
+        links = self.graph1.get_links_from_node(include_features_only=True)
 
         # Should only include links between cross layer transcoder features
         # (except from the starting node which can be any type)
         for link in links:
-            source_node = next(n for n in self.graph_metadata1['nodes'] if n['node_id'] == link['source'])
-            target_node = next(n for n in self.graph_metadata1['nodes'] if n['node_id'] == link['target'])
+            source_node = next(n for n in self.graph1.nodes if n['node_id'] == link['source'])
+            target_node = next(n for n in self.graph1.nodes if n['node_id'] == link['target'])
 
             # Starting node (logit) is allowed, but all other sources/targets must be features
             if source_node['node_id'] != "logit_5000_1" and target_node['node_id'] != "logit_5000_1":
@@ -388,25 +393,32 @@ class TestGraphFunctions(unittest.TestCase):
                 is_target_feature = target_node['feature_type'] == 'cross layer transcoder'
                 self.assertTrue(is_source_feature or is_target_feature)
 
-    @patch('subgraph_comparisons.create_or_load_graph')
-    def test_nodes_not_in_returns_unique_nodes(self, mock_create_or_load):
+    @patch.object(GraphAnalyzer, 'load_graphs_and_dfs')
+    def test_nodes_not_in_returns_unique_nodes(self, mock_load_graphs):
         """Test nodes_not_in returns nodes unique to the main prompt."""
+        # Create node DataFrames for the graphs
+        main_df = self.graph1.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
+                                              drop_duplicates=True)
+        other_df = self.graph2.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
+                                               drop_duplicates=True)
+
         # Mock the graph loading to return our fake graphs
-        mock_create_or_load.side_effect = [self.graph_metadata1, self.graph_metadata2]
-
-        main_prompt = "THE SOFTWARE IS PROVIDED AS IS"
-        compare_prompts = ["THE SOFTWARE IS PROVIDED WITHOUT WARRANTY"]
-
-        graph_metadata, unique_features = nodes_not_in(
-            main_prompt=main_prompt,
-            prompts2compare=compare_prompts,
-            model="gemma-2-2b",
-            submodel="gemmascope-transcoder-16k",
-            graph_dir="/fake/path"
+        mock_load_graphs.return_value = (
+            {'main': self.graph1, 'other': self.graph2},
+            {'main': main_df, 'other': other_df}
         )
 
-        # Should return the first graph metadata
-        self.assertEqual(graph_metadata['metadata']['slug'], 'test-graph-1')
+        # Create analyzer with mock
+        mock_neuronpedia = MagicMock()
+        analyzer = GraphAnalyzer(
+            prompts={'main': 'THE SOFTWARE IS PROVIDED AS IS', 'other': 'THE SOFTWARE IS PROVIDED WITHOUT WARRANTY'},
+            neuronpedia_manager=mock_neuronpedia
+        )
+
+        unique_features = analyzer.nodes_not_in(
+            main_prompt_id='main',
+            comparison_prompts=['other']
+        )
 
         # Unique features should contain layer 2 feature (3000) and layer 3 feature (5000) which are only in graph 1
         # Layers 0 and 1 features (1000, 2000) are in both graphs so should be filtered out
@@ -424,55 +436,72 @@ class TestGraphFunctions(unittest.TestCase):
         self.assertNotIn(('0', '1000'), combined)
         self.assertNotIn(('1', '2000'), combined)
 
-    @patch('subgraph_comparisons.create_or_load_graph')
-    def test_nodes_not_in_with_metrics(self, mock_create_or_load):
-        """Test nodes_not_in returns metrics when return_metrics=True."""
-        mock_create_or_load.side_effect = [self.graph_metadata1, self.graph_metadata2]
+    @patch.object(GraphAnalyzer, 'load_graphs_and_dfs')
+    def test_nodes_not_in_with_metrics(self, mock_load_graphs):
+        """Test nodes_not_in returns metrics when metrics2run is provided."""
+        # Create node DataFrames for the graphs
+        main_df = self.graph1.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
+                                              drop_duplicates=True)
+        other_df = self.graph2.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
+                                               drop_duplicates=True)
 
-        main_prompt = "THE SOFTWARE IS PROVIDED AS IS"
-        compare_prompts = ["THE SOFTWARE IS PROVIDED WITHOUT WARRANTY"]
+        mock_load_graphs.return_value = (
+            {'main': self.graph1, 'other': self.graph2},
+            {'main': main_df, 'other': other_df}
+        )
 
-        graph_metadata, unique_features, metrics = nodes_not_in(
-            main_prompt=main_prompt,
-            prompts2compare=compare_prompts,
-            model="gemma-2-2b",
-            submodel="gemmascope-transcoder-16k",
-            graph_dir="/fake/path",
-            return_metrics=True
+        mock_neuronpedia = MagicMock()
+        analyzer = GraphAnalyzer(
+            prompts={'main': 'THE SOFTWARE IS PROVIDED AS IS', 'other': 'THE SOFTWARE IS PROVIDED WITHOUT WARRANTY'},
+            neuronpedia_manager=mock_neuronpedia
+        )
+
+        unique_features, metrics = analyzer.nodes_not_in(
+            main_prompt_id='main',
+            comparison_prompts=['other'],
+            metrics2run={ComparisonMetrics.JACCARD_INDEX, ComparisonMetrics.WEIGHTED_JACCARD,
+                         ComparisonMetrics.FRAC_FROM_INTERSECTION}
         )
 
         # Should return metrics dict
         self.assertIsInstance(metrics, dict)
-        self.assertIn(compare_prompts[0], metrics)
+        self.assertIn('other', metrics)
 
-        # Metrics should be IntersectionMetrics namedtuple
-        metric = metrics[compare_prompts[0]]
-        self.assertTrue(hasattr(metric, 'jaccard_index'))
-        self.assertTrue(hasattr(metric, 'relative_contribution'))
-        self.assertTrue(hasattr(metric, 'frac_from_intersection'))
+        # Metrics should be a dict with metric names as keys
+        metric = metrics['other']
+        self.assertIn('jaccard_index', metric)
+        self.assertIn('weighted_jaccard', metric)
+        self.assertIn('frac_from_intersection', metric)
 
-    @patch('subgraph_comparisons.create_or_load_graph')
-    def test_nodes_not_in_multiple_prompts(self, mock_create_or_load):
+    @patch.object(GraphAnalyzer, 'load_graphs_and_dfs')
+    def test_nodes_not_in_multiple_prompts(self, mock_load_graphs):
         """Test nodes_not_in correctly filters features not in ANY of multiple comparison prompts."""
-        # Mock returns graph1, then graph2, then graph3
-        mock_create_or_load.side_effect = [
-            self.graph_metadata1,
-            self.graph_metadata2,
-            self.graph_metadata3
-        ]
+        # Create node DataFrames for the graphs
+        main_df = self.graph1.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
+                                              drop_duplicates=True)
+        other_df2 = self.graph2.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
+                                                drop_duplicates=True)
+        other_df3 = self.graph3.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
+                                                drop_duplicates=True)
 
-        main_prompt = "THE SOFTWARE IS PROVIDED AS IS"
-        compare_prompts = [
-            "THE SOFTWARE IS PROVIDED WITHOUT WARRANTY",
-            "THE SOFTWARE AND MATERIALS ARE PROVIDED"
-        ]
+        mock_load_graphs.return_value = (
+            {'main': self.graph1, 'other1': self.graph2, 'other2': self.graph3},
+            {'main': main_df, 'other1': other_df2, 'other2': other_df3}
+        )
 
-        graph_metadata, unique_features = nodes_not_in(
-            main_prompt=main_prompt,
-            prompts2compare=compare_prompts,
-            model="gemma-2-2b",
-            submodel="gemmascope-transcoder-16k",
-            graph_dir="/fake/path"
+        mock_neuronpedia = MagicMock()
+        analyzer = GraphAnalyzer(
+            prompts={
+                'main': 'THE SOFTWARE IS PROVIDED AS IS',
+                'other1': 'THE SOFTWARE IS PROVIDED WITHOUT WARRANTY',
+                'other2': 'THE SOFTWARE AND MATERIALS ARE PROVIDED'
+            },
+            neuronpedia_manager=mock_neuronpedia
+        )
+
+        unique_features = analyzer.nodes_not_in(
+            main_prompt_id='main',
+            comparison_prompts=['other1', 'other2']
         )
 
         # Verify the feature distribution:
@@ -499,77 +528,125 @@ class TestGraphFunctions(unittest.TestCase):
         self.assertEqual(unique_features.iloc[0]['layer'], '3')
         self.assertEqual(unique_features.iloc[0]['feature'], '5000')
 
-    def test_calculate_intersection_metrics_jaccard_index(self):
+    @patch.object(GraphAnalyzer, 'load_graphs_and_dfs')
+    def test_calculate_intersection_metrics_jaccard_index(self, mock_load_graphs):
         """Test calculate_intersection_metrics computes correct jaccard index."""
         # Create node DataFrames
         node_df1 = pd.DataFrame({
             'layer': ['0', '1', '2'],
-            'feature': [1000, 2000, 3000]
+            'feature': ['1000', '2000', '3000'],
+            'feature_type': ['cross layer transcoder'] * 3,
+            'ctx_idx': [1, 1, 1]
         })
 
         node_df2 = pd.DataFrame({
             'layer': ['0', '1', '1'],
-            'feature': [1000, 2000, 4000]
+            'feature': ['1000', '2000', '4000'],
+            'feature_type': ['cross layer transcoder'] * 3,
+            'ctx_idx': [1, 1, 1]
         })
 
-        metrics = calculate_intersection_metrics(
-            node_df1, node_df2,
-            self.graph_metadata1, self.graph_metadata2
+        mock_load_graphs.return_value = (
+            {'main': self.graph1, 'other': self.graph2},
+            {'main': node_df1, 'other': node_df2}
+        )
+
+        mock_neuronpedia = MagicMock()
+        analyzer = GraphAnalyzer(
+            prompts={'main': 'prompt1', 'other': 'prompt2'},
+            neuronpedia_manager=mock_neuronpedia
+        )
+
+        metrics = analyzer.calculate_intersection_metrics(
+            prompt1_id='main',
+            prompt2_id='other',
+            metrics={ComparisonMetrics.JACCARD_INDEX, ComparisonMetrics.FRAC_FROM_INTERSECTION,
+                     ComparisonMetrics.WEIGHTED_JACCARD}
         )
 
         # Intersection: (0, 1000) and (1, 2000) = 2 nodes
         # Union: 4 nodes (1000, 2000, 3000, 4000)
         # Jaccard: 2 / 4 = 0.5
-        self.assertAlmostEqual(metrics.jaccard_index, 0.5, places=2)
+        self.assertAlmostEqual(metrics['jaccard_index'], 0.5, places=2)
 
         # Fraction from intersection: 2 / 3 (2 common out of 3 in df1)
-        self.assertAlmostEqual(metrics.frac_from_intersection, 2/3, places=2)
+        self.assertAlmostEqual(metrics['frac_from_intersection'], 2/3, places=2)
 
-        # Relative contribution should be between 0 and 1
-        self.assertGreaterEqual(metrics.relative_contribution, 0)
-        self.assertLessEqual(metrics.relative_contribution, 1)
+        # Weighted jaccard should be between 0 and 1
+        self.assertGreaterEqual(metrics['weighted_jaccard'], 0)
+        self.assertLessEqual(metrics['weighted_jaccard'], 1)
 
-    def test_calculate_intersection_metrics_no_overlap(self):
+    @patch.object(GraphAnalyzer, 'load_graphs_and_dfs')
+    def test_calculate_intersection_metrics_no_overlap(self, mock_load_graphs):
         """Test calculate_intersection_metrics when there's no overlap."""
         node_df1 = pd.DataFrame({
             'layer': ['0', '1'],
-            'feature': [1000, 2000]
+            'feature': ['1000', '2000'],
+            'feature_type': ['cross layer transcoder'] * 2,
+            'ctx_idx': [1, 1]
         })
 
         node_df2 = pd.DataFrame({
             'layer': ['2', '3'],
-            'feature': [3000, 4000]
+            'feature': ['3000', '4000'],
+            'feature_type': ['cross layer transcoder'] * 2,
+            'ctx_idx': [1, 1]
         })
 
-        metrics = calculate_intersection_metrics(
-            node_df1, node_df2,
-            self.graph_metadata1, self.graph_metadata2
+        mock_load_graphs.return_value = (
+            {'main': self.graph1, 'other': self.graph2},
+            {'main': node_df1, 'other': node_df2}
+        )
+
+        mock_neuronpedia = MagicMock()
+        analyzer = GraphAnalyzer(
+            prompts={'main': 'prompt1', 'other': 'prompt2'},
+            neuronpedia_manager=mock_neuronpedia
+        )
+
+        metrics = analyzer.calculate_intersection_metrics(
+            prompt1_id='main',
+            prompt2_id='other',
+            metrics={ComparisonMetrics.JACCARD_INDEX, ComparisonMetrics.FRAC_FROM_INTERSECTION}
         )
 
         # No intersection: jaccard should be 0
-        self.assertEqual(metrics.jaccard_index, 0.0)
+        self.assertEqual(metrics['jaccard_index'], 0.0)
 
         # Fraction from intersection should be 0
-        self.assertEqual(metrics.frac_from_intersection, 0.0)
+        self.assertEqual(metrics['frac_from_intersection'], 0.0)
 
-    def test_get_links_union_structure(self):
-        """Test get_links_union returns correct nested dictionary structure."""
-        links_lookup, relative_contributions = get_links_overlap(
-            self.graph_metadata1,
-            self.graph_metadata2
+    @patch.object(GraphAnalyzer, 'load_graphs_and_dfs')
+    def test_get_links_overlap_structure(self, mock_load_graphs):
+        """Test get_links_overlap returns correct nested dictionary structure."""
+        main_df = self.graph1.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
+                                              drop_duplicates=True)
+        other_df = self.graph2.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
+                                               drop_duplicates=True)
+
+        mock_load_graphs.return_value = (
+            {'main': self.graph1, 'other': self.graph2},
+            {'main': main_df, 'other': other_df}
+        )
+
+        mock_neuronpedia = MagicMock()
+        analyzer = GraphAnalyzer(
+            prompts={'main': 'prompt1', 'other': 'prompt2'},
+            neuronpedia_manager=mock_neuronpedia
+        )
+
+        links_lookup, (intersection, total), output_node2 = analyzer.get_links_overlap(
+            self.graph1,
+            self.graph2,
+            raise_if_no_matching_tokens=False
         )
 
         # Should return a nested dictionary
         self.assertIsInstance(links_lookup, dict)
 
-        # Should return relative contributions as a list of 2 values
-        self.assertIsInstance(relative_contributions, list)
-        self.assertEqual(len(relative_contributions), 2)
-
-        # Each value in relative_contributions should be between 0 and 1
-        for contrib in relative_contributions:
-            self.assertGreaterEqual(contrib, 0)
-            self.assertLessEqual(contrib, 1)
+        # Should return intersection and total arrays
+        self.assertEqual(len(intersection), 2)
+        self.assertEqual(len(total), 2)
 
         # Check structure: target -> source -> [weight1, weight2]
         for target_id, sources in links_lookup.items():
@@ -578,11 +655,29 @@ class TestGraphFunctions(unittest.TestCase):
                 self.assertIsInstance(weights, list)
                 self.assertEqual(len(weights), 2)
 
-    def test_get_links_union_intersecting_links(self):
-        """Test get_links_union handles intersecting links correctly."""
-        links_lookup, relative_contributions = get_links_overlap(
-            self.graph_metadata1,
-            self.graph_metadata2
+    @patch.object(GraphAnalyzer, 'load_graphs_and_dfs')
+    def test_get_links_overlap_intersecting_links(self, mock_load_graphs):
+        """Test get_links_overlap handles intersecting links correctly."""
+        main_df = self.graph1.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
+                                              drop_duplicates=True)
+        other_df = self.graph2.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
+                                               drop_duplicates=True)
+
+        mock_load_graphs.return_value = (
+            {'main': self.graph1, 'other': self.graph2},
+            {'main': main_df, 'other': other_df}
+        )
+
+        mock_neuronpedia = MagicMock()
+        analyzer = GraphAnalyzer(
+            prompts={'main': 'prompt1', 'other': 'prompt2'},
+            neuronpedia_manager=mock_neuronpedia
+        )
+
+        links_lookup, (intersection, total), output_node2 = analyzer.get_links_overlap(
+            self.graph1,
+            self.graph2,
+            raise_if_no_matching_tokens=False
         )
 
         # Common links should have non-zero weights in both positions
@@ -595,11 +690,29 @@ class TestGraphFunctions(unittest.TestCase):
             self.assertGreater(weights[0], 0)  # From graph 1
             self.assertGreater(weights[1], 0)  # From graph 2
 
-    def test_get_links_union_non_intersecting_links(self):
-        """Test get_links_union handles non-intersecting links with zero weights."""
-        links_lookup, relative_contributions = get_links_overlap(
-            self.graph_metadata1,
-            self.graph_metadata2
+    @patch.object(GraphAnalyzer, 'load_graphs_and_dfs')
+    def test_get_links_overlap_non_intersecting_links(self, mock_load_graphs):
+        """Test get_links_overlap handles non-intersecting links with zero weights."""
+        main_df = self.graph1.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
+                                              drop_duplicates=True)
+        other_df = self.graph2.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
+                                               drop_duplicates=True)
+
+        mock_load_graphs.return_value = (
+            {'main': self.graph1, 'other': self.graph2},
+            {'main': main_df, 'other': other_df}
+        )
+
+        mock_neuronpedia = MagicMock()
+        analyzer = GraphAnalyzer(
+            prompts={'main': 'prompt1', 'other': 'prompt2'},
+            neuronpedia_manager=mock_neuronpedia
+        )
+
+        links_lookup, (intersection, total), output_node2 = analyzer.get_links_overlap(
+            self.graph1,
+            self.graph2,
+            raise_if_no_matching_tokens=False
         )
 
         # Links unique to one graph should have zero weight for the other
