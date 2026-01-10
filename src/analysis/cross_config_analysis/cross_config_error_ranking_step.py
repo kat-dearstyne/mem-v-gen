@@ -7,11 +7,10 @@ import pandas as pd
 from scipy.stats import wilcoxon, ttest_rel
 
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
-from src.analysis.config_analysis.config_error_ranking_step import ErrorRankingMetrics, PermutationTestResult, \
-    ConfigErrorRankingStep
+from src.analysis.config_analysis.config_error_ranking_step import ErrorRankingMetrics, ConfigErrorRankingStep
 from src.analysis.cross_config_analysis.cross_config_analyze_step import CrossConfigAnalyzeStep
 from src.utils import append_to_dict_list, get_conditions_from_label, create_label_from_conditions
-from visualizations import boxplot_metric_family, plot_delta_distribution
+from src.visualizations import boxplot_metric_family, plot_delta_distribution
 
 PooledStatsResult = namedtuple("PooledStatsResult", [
     "mean", "median", "wilcoxon_stat_onesided", "wilcoxon_p_onesided",
@@ -130,12 +129,12 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
         rows = []
 
         def add_scores_to_row(metric: ErrorRankingMetrics, k, g1_list):
-            g2_list = g2_values[metric.value] if k is None else g2_values[metric.value][k]
-            d_list = deltas[metric.value] if k is None else deltas[metric.value][k]
+            g2_list = g2_values[metric] if k is None else g2_values[metric][k]
+            d_list = deltas[metric] if k is None else deltas[metric][k]
             for i, (g1, g2, d) in enumerate(zip(g1_list, g2_list, d_list)):
                 sample_id = i if not sample_ids else sample_ids[i]
                 rows.append(RawScoreRow(
-                    metric=metric.value if k is None else f"{metric.value}@{k}",
+                    metric=metric.value if k is None else f"{metric.value}@{k}",  # Use .value for CSV
                     sample=sample_id,
                     g1_score=g1,
                     g2_score=g2,
@@ -223,11 +222,11 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
 
         def extract_values(metric, k, result):
             if k is not None:
-                append_to_dict_list(g1[metric.value], k, result.metric_graph1)
-                append_to_dict_list(g2[metric.value], k, result.metric_graph2)
+                append_to_dict_list(g1[metric], k, result.metric_graph1)
+                append_to_dict_list(g2[metric], k, result.metric_graph2)
             else:
-                g1[metric.value].append(result.metric_graph1)
-                g2[metric.value].append(result.metric_graph2)
+                g1[metric].append(result.metric_graph1)
+                g2[metric].append(result.metric_graph2)
             return None
 
         for res in condition_results:
@@ -250,9 +249,9 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
         def add_delta(metric, k, result):
             d = result.metric_graph1 - result.metric_graph2
             if k is not None:
-                append_to_dict_list(deltas[metric.value], k, d)
+                append_to_dict_list(deltas[metric], k, d)
             else:
-                deltas[metric.value].append(d)
+                deltas[metric].append(d)
             return None
 
         for res in condition_results:
@@ -296,31 +295,31 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
         Iterates through all metrics in data and applies a function to each.
 
         Args:
-            data: Input data dictionary keyed by metric.value.
+            data: Input data dictionary keyed by metric enum.
             fn: Callable(metric, k_or_none, metric_data) that returns a result.
 
         Returns:
-            Dictionary of results keyed by metric.value.
+            Dictionary of results keyed by metric enum.
         """
         results = {}
         for metric in ConfigErrorRankingStep.ALL_METRICS:
-            if metric_data := data.get(metric.value):
+            if metric_data := data.get(metric):
                 if metric in ConfigErrorRankingStep.K_METRICS:
-                    results[metric.value] = {}
+                    results[metric] = {}
                     for k, k_data in metric_data.items():
-                        results[metric.value][k] = fn(metric, k, k_data)
+                        results[metric][k] = fn(metric, k, k_data)
                 else:
-                    results[metric.value] = fn(metric, None, metric_data)
+                    results[metric] = fn(metric, None, metric_data)
         return results
 
-    def _init_metric_structure(self) -> Dict[str, Any]:
+    def _init_metric_structure(self) -> Dict[ErrorRankingMetrics, Any]:
         """
         Initializes an empty metric structure ({} for K_METRICS, [] for others).
 
         Returns:
             Dictionary with empty structures for each metric.
         """
-        return {metric.value: ({} if metric in ConfigErrorRankingStep.K_METRICS else [])
+        return {metric: ({} if metric in ConfigErrorRankingStep.K_METRICS else [])
                 for metric in ConfigErrorRankingStep.ALL_METRICS}
 
     def _combine_results_across_conditions(self, all_deltas: dict[str, dict[str, Any]]) -> dict[
@@ -338,11 +337,11 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
 
         def extend_pooled(metric, k, vals):
             if k is not None:
-                if k not in pooled_deltas[metric.value]:
-                    pooled_deltas[metric.value][k] = []
-                pooled_deltas[metric.value][k].extend(vals)
+                if k not in pooled_deltas[metric]:
+                    pooled_deltas[metric][k] = []
+                pooled_deltas[metric][k].extend(vals)
             else:
-                pooled_deltas[metric.value].extend(vals)
+                pooled_deltas[metric].extend(vals)
             return None
 
         for condition_name, deltas in all_deltas.items():
@@ -375,14 +374,14 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
 
         # Save boxplots for each metric
         for metric in ConfigErrorRankingStep.K_METRICS:
-            if metric.value in deltas:
-                boxplot_metric_family(deltas[metric.value], metric.get_printable(),
+            if metric in deltas:
+                boxplot_metric_family(deltas[metric], metric.get_printable(),
                                       label = label,
                                       save_path=output_path / f"{metric.name.lower()}_boxplot.png")
 
         # Save delta distribution plot (only for pooled)
-        if is_pooled and ErrorRankingMetrics.AP.value in deltas:
-            plot_delta_distribution(deltas[ErrorRankingMetrics.AP.value],
+        if is_pooled and ErrorRankingMetrics.AP in deltas:
+            plot_delta_distribution(deltas[ErrorRankingMetrics.AP],
                                     "Average Precision Δ Distribution (Pooled)",
                                     label = label,
                                     save_path=output_path / "ap_distribution.png")

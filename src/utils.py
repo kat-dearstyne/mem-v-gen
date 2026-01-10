@@ -1,23 +1,90 @@
+import inspect
 import json
 import os
-from enum import Enum
+from datetime import datetime
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Callable, Dict, Any, List
 
 import pandas as pd
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
-class Metrics(Enum):
-    """Base enum class for metric definitions with display formatting."""
+def get_env_bool(name: str, default: bool = False) -> bool:
+    """
+    Get a boolean value from an environment variable.
 
-    def get_printable(self) -> str:
-        """
-        Returns the name with spaces instead of underscores.
+    Args:
+        name: The name of the environment variable.
+        default: The default value if the environment variable is not set.
 
-        Returns:
-            The metric name formatted with spaces and title case.
-        """
-        return " ".join(self.value.split("_")).title()
+    Returns:
+        Boolean value from the environment variable.
+    """
+    default_str = str(default).lower()
+    return os.getenv(name, default_str).lower() == "true"
+
+
+def get_env_int(name: str, default: int = 0) -> int:
+    """
+    Get an integer value from an environment variable.
+
+    Args:
+        name: The name of the environment variable.
+        default: The default value if the environment variable is not set or invalid.
+
+    Returns:
+        Integer value from the environment variable.
+    """
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def get_env_list(name: str, default: List[str] = None) -> List[str]:
+    """
+    Get a list of strings from a comma-separated environment variable.
+
+    Args:
+        name: The name of the environment variable.
+        default: The default value if the environment variable is not set.
+
+    Returns:
+        List of strings from the environment variable.
+    """
+    if default is None:
+        default = []
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    return [item.strip() for item in value.split(",")]
+
+
+def get_env_int_list(name: str, default: List[int] = None) -> List[int]:
+    """
+    Get a list of integers from a comma-separated environment variable.
+
+    Args:
+        name: The name of the environment variable.
+        default: The default value if the environment variable is not set.
+
+    Returns:
+        List of integers from the environment variable.
+    """
+    if default is None:
+        default = []
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    try:
+        return [int(item.strip()) for item in value.split(",")]
+    except ValueError:
+        return default
 
 
 def save_df(df: pd.DataFrame, foldername: str, filename: str) -> str:
@@ -138,3 +205,27 @@ def get_as_safe_name(orig_name: str) -> str:
     Returns: Name as a safe name for saving as a file (-> snakecase).
     """
     return orig_name.replace(" ", "_").replace("-", "_")
+
+def create_run_uuid() -> str:
+    """
+    Creates a UUID for run based on current datetime.
+    Returns: UUID for run.
+
+    """
+    return datetime.now().strftime("%m-%d-%y %H:%M:%S")
+
+
+def get_method_kwargs(method: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Filters kwargs to only include parameters accepted by the given method.
+
+    Args:
+        method: The method/function to inspect.
+        kwargs: Dictionary of keyword arguments to filter.
+
+    Returns:
+        Dictionary containing only kwargs that match the method's parameters.
+    """
+    sig = inspect.signature(method)
+    valid_params = set(sig.parameters.keys())
+    return {k: v for k, v in kwargs.items() if k in valid_params}

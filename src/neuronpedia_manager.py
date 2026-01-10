@@ -10,7 +10,7 @@ from tqdm import tqdm
 from src.constants import DEFAULT_SAVE_DIR, SAVE_FEATURE_FILENAME
 from src.graph_manager import GraphManager
 from src.neuronpedia_urls import NeuronpediaUrls
-from src.utils import load_json, save_json, get_api_key
+from src.utils import load_json, save_json, get_api_key, create_run_uuid
 
 
 @dataclass
@@ -322,6 +322,7 @@ class NeuronpediaManager:
         Returns:
             The subgraph ID.
         """
+        list_name +=  f"{create_run_uuid()}"
         res = requests.post(
             NeuronpediaUrls.SUBGRAPH_SAVE.value,
             headers={

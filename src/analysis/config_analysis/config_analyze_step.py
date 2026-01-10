@@ -1,29 +1,26 @@
 import abc
-from typing import Dict, List
+from typing import Any, TYPE_CHECKING
 
-from src.graph_manager import GraphManager
+if TYPE_CHECKING:
+    from src.graph_analyzer import GraphAnalyzer
 
 
 class ConfigAnalyzeStep(abc.ABC):
 
-    def __init__(self,  **kwargs):
+    def __init__(self, graph_analyzer: "GraphAnalyzer", **kwargs):
         """
-        Runs an analysis on the graphs.
-
         Args:
-            **kwargs: Params needed for step.
+            graph_analyzer: GraphAnalyzer instance with loaded graphs.
+            **kwargs: Additional params needed for step.
         """
+        self.graph_analyzer = graph_analyzer
         self.kwargs = kwargs
 
     @abc.abstractmethod
-    def run(self, graphs: List[GraphManager], conditions: List[str] = None) -> Dict:
+    def run(self) -> Any:
         """
         Runs the step logic.
 
-        Args:
-            graphs: Graphs to run analysis on.
-            conditions: Conditions corresponding with each graph.
-
         Returns:
-            Dictionary of results.
+            Results of the analysis step.
         """

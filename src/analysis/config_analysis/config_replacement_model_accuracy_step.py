@@ -4,7 +4,7 @@ from collections import namedtuple
 from copy import deepcopy
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -17,25 +17,11 @@ from src.constants import IS_TEST, TOP_K
 from src.analysis.config_analysis.config_analyze_step import ConfigAnalyzeStep
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
 from src.graph_manager import GraphManager
-from src.utils import Metrics, save_json
+from src.metrics import ReplacementAccuracyMetrics
+from src.utils import save_json
 
-
-class ReplacementAccuracyMetrics(Metrics):
-    """Metrics for comparing base model and replacement model outputs."""
-    LAST_TOKEN_COSINE = "last_token_cosine"
-    CUMULATIVE_COSINE = "cumulative_cosine"
-    ORIGINAL_ACCURACY = "original_accuracy"
-    ORIGINAL_TOP_TOKEN = "original_top_token"
-    REPLACEMENT_TOP_TOKEN = "replacement_top_token"
-    KL_DIVERGENCE = "kl_divergence"
-    TOP_K_AGREEMENT = "top_k_agreement"
-    REPLACEMENT_PROB_OF_ORIGINAL_TOP = "replacement_prob_of_original_top"
-    PERPLEXITY_LAST_TOKEN = "perplexity_last_token"
-    PERPLEXITY_FULL = "perplexity_full"
-    PER_POSITION_COSINE = "per_position_cosine"
-    PER_POSITION_KL = "per_position_kl"
-    PER_POSITION_ARGMAX_MATCH = "per_position_argmax_match"
-    PER_POSITION_CROSS_ENTROPY = "per_position_cross_entropy"
+if TYPE_CHECKING:
+    from src.graph_analyzer import GraphAnalyzer
 
 
 ReplacementPredComparison = namedtuple("ReplacementPredComparison", [
@@ -60,12 +46,16 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
     BASE_MODEL = "google/gemma-2-2b"
     SUB_MODEL = "mntss/clt-gemma-2-2b-426k"
 
-    def __init__(self, memorized_completion: str,
-                 metrics2run: set[ReplacementAccuracyMetrics] | None = None):
+    def __init__(self,
+                 graph_analyzer: "GraphAnalyzer",
+                 memorized_completion: str,
+                 metrics2run: set[ReplacementAccuracyMetrics] | None = None,
+                 **kwargs):
         """
         Initializes the config replacement model accuracy step.
 
         Args:
+            graph_analyzer: GraphAnalyzer instance with loaded graphs.
             memorized_completion: Expected memorized completion for prompt.
             metrics2run: Set of metrics to compute (default: all metrics).
         """
@@ -82,48 +72,23 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
             ReplacementAccuracyMetrics.TOP_K_AGREEMENT: self.get_top_k_agreement,
             ReplacementAccuracyMetrics.REPLACEMENT_PROB_OF_ORIGINAL_TOP: self.get_replacement_prob_of_original_top
         }
-        super().__init__()
+        super().__init__(graph_analyzer=graph_analyzer, **kwargs)
 
-    def run(self, graphs: list[GraphManager], conditions: list[str] | None = None) -> dict:
+    def run(self) -> dict:
         """
-        Run the analysis step on the provided graphs.
-
-        Args:
-            graphs: List of graph managers containing prompts.
-            conditions: List of condition names corresponding to each graph.
+        Run the analysis step on all graphs.
 
         Returns:
-            Dictionary mapping conditions to their metric results.
+            Dictionary mapping prompt IDs to their metric results.
         """
         print("Loading model...")
         model = self.load_model()
         print("Model loaded.\n")
 
-        results = self.run_analysis_for_configs(model, graphs, conditions)
-
-        return results
-
-    def run_analysis_for_configs(self, model: ReplacementModel, graphs: list[GraphManager],
-                                 conditions: list[str] | None = None) -> dict:
-        """
-        Run accuracy analysis across all configs and conditions.
-
-        Args:
-            model: The ReplacementModel instance.
-            graphs: List of graph managers containing prompts.
-            conditions: List of condition names corresponding to each graph.
-
-        Returns:
-            Dictionary mapping conditions to their metric results.
-        """
-        assert conditions, "Replacement Model Accuracy expects conditions to be defined."
         results = {}
-
-        for graph_idx, graph in enumerate(graphs):
-            condition = conditions[graph_idx]
-            prompt = graph.prompt
-            metrics = self.run_accuracy_test(prompt)
-            results[condition] = metrics
+        for prompt_id, graph in self.graph_analyzer.graphs.items():
+            metrics = self.run_accuracy_test(graph.prompt)
+            results[prompt_id] = metrics
 
         return results
 
@@ -196,7 +161,7 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
             ReplacementAccuracyMetrics.REPLACEMENT_TOP_TOKEN: replacement_output.top_token,
             **results
         }
-        return {metric.value: res for metric, res in results.items()}
+        return results
 
     @staticmethod
     def save_results(results: dict, output_dir: Path) -> None:
@@ -204,7 +169,7 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
         Save results to JSON file.
 
         Args:
-            results: Dictionary structured as {config_name: {step: {condition: metrics}}}.
+            results: Dictionary structured as {config_name: {SupportedConfigAnalyzeStep: {condition: metrics}}}.
             output_dir: Directory to save the output file.
         """
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -213,7 +178,7 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
         # Convert namedtuples to dicts for JSON serialization
         serializable_results = {}
         for config_name, config_results in results.items():
-            condition_metrics = config_results[SupportedConfigAnalyzeStep.REPLACEMENT_MODEL.name]
+            condition_metrics = config_results[SupportedConfigAnalyzeStep.REPLACEMENT_MODEL]
             serializable_results[config_name] = {
                 condition: metrics
                 for condition, metrics in condition_metrics.items()

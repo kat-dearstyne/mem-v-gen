@@ -1,12 +1,17 @@
-from utils import get_env_bool
+from pathlib import Path
+
+from src.utils import get_env_bool
+
+# Project root directory (parent of src/)
+PROJECT_ROOT = Path(__file__).parent.parent
 
 """
 ========= Paths ===========
 """
-DEFAULT_SAVE_DIR = "../data/neuronpedia/"
-CONFIG_BASE_DIR = "../configs"
+DEFAULT_SAVE_DIR = PROJECT_ROOT / "data" / "neuronpedia"
+CONFIG_BASE_DIR = PROJECT_ROOT / "configs"
 DATA_PATH = "~/data/spar-memory/neuronpedia/"
-OUTPUT_DIR = "../output"
+OUTPUT_DIR = PROJECT_ROOT / "output"
 
 """
 ========= Filenames ===========

@@ -1588,6 +1588,161 @@ def plot_delta_distribution(delta_values: List[float], title: str, label: str,
         plt.show()
 
 
+def plot_early_layer_boxplot(df: pd.DataFrame,
+                              condition_order: List[str],
+                              value_col: str = 'early_layer_fraction',
+                              condition_col: str = 'prompt_type',
+                              save_path: Optional[Path] = None) -> None:
+    """
+    Creates boxplot comparing early layer contribution between conditions.
+
+    Args:
+        df: DataFrame with early layer fractions.
+        condition_order: Order of conditions for x-axis.
+        value_col: Column name for the values.
+        condition_col: Column name for the condition.
+        save_path: Optional path to save the figure.
+    """
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    data = [df[df[condition_col] == cond][value_col].dropna().values
+            for cond in condition_order]
+
+    bp = ax.boxplot(data, labels=condition_order, patch_artist=True)
+
+    for i, patch in enumerate(bp['boxes']):
+        patch.set_facecolor(CUSTOM_PALETTE[i % len(CUSTOM_PALETTE)])
+        patch.set_alpha(0.7)
+
+    ax.set_ylabel('Early Layer Contribution Fraction')
+    ax.set_xlabel('Condition')
+    ax.set_title('Early Layer Contribution by Condition')
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def plot_early_layer_mean_comparison(df: pd.DataFrame,
+                                      condition_order: List[str],
+                                      p_value: Optional[float] = None,
+                                      value_col: str = 'early_layer_fraction',
+                                      condition_col: str = 'prompt_type',
+                                      save_path: Optional[Path] = None) -> None:
+    """
+    Creates bar chart with means and error bars for early layer contribution.
+
+    Args:
+        df: DataFrame with early layer fractions.
+        condition_order: Order of conditions for x-axis.
+        p_value: Optional p-value for significance annotation.
+        value_col: Column name for the values.
+        condition_col: Column name for the condition.
+        save_path: Optional path to save the figure.
+    """
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    means = []
+    stds = []
+    for cond in condition_order:
+        cond_data = df[df[condition_col] == cond][value_col].dropna()
+        means.append(cond_data.mean())
+        stds.append(cond_data.std())
+
+    x = np.arange(len(condition_order))
+    ax.bar(x, means, yerr=stds, capsize=5,
+           color=[CUSTOM_PALETTE[i % len(CUSTOM_PALETTE)] for i in range(len(condition_order))],
+           alpha=0.7, edgecolor='black')
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(condition_order)
+    ax.set_ylabel('Early Layer Contribution Fraction')
+    ax.set_xlabel('Condition')
+    ax.set_title('Mean Early Layer Contribution by Condition')
+
+    # Add significance annotation if p-value provided
+    if p_value is not None and len(condition_order) == 2:
+        sig_text = _get_significance_stars(p_value)
+        if sig_text:
+            y_max = max(means) + max(stds) * 1.5
+            ax.plot([0, 1], [y_max, y_max], 'k-', linewidth=1)
+            ax.text(0.5, y_max * 1.02, sig_text, ha='center', va='bottom', fontsize=12)
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def plot_early_layer_by_config(df: pd.DataFrame,
+                                condition_order: List[str],
+                                config_order: List[str],
+                                value_col: str = 'early_layer_fraction',
+                                condition_col: str = 'prompt_type',
+                                config_col: str = 'config_name',
+                                save_path: Optional[Path] = None) -> None:
+    """
+    Creates line plot showing early layer contribution by config for each condition.
+
+    Args:
+        df: DataFrame with early layer fractions.
+        condition_order: Order of conditions for legend.
+        config_order: Order of configs for x-axis.
+        value_col: Column name for the values.
+        condition_col: Column name for the condition.
+        config_col: Column name for the config.
+        save_path: Optional path to save the figure.
+    """
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    for i, cond in enumerate(condition_order):
+        cond_df = df[df[condition_col] == cond]
+        values = []
+        for config in config_order:
+            config_val = cond_df[cond_df[config_col] == config][value_col]
+            values.append(config_val.values[0] if len(config_val) > 0 else np.nan)
+
+        ax.plot(config_order, values, marker='o', label=cond,
+                color=CUSTOM_PALETTE[i % len(CUSTOM_PALETTE)], linewidth=2, markersize=8)
+
+    ax.set_xlabel('Config')
+    ax.set_ylabel('Early Layer Contribution Fraction')
+    ax.set_title('Early Layer Contribution by Config and Condition')
+    ax.legend()
+
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def _get_significance_stars(p_value: float) -> str:
+    """
+    Returns significance stars based on p-value.
+
+    Args:
+        p_value: The p-value from statistical test.
+
+    Returns:
+        String with asterisks indicating significance level.
+    """
+    if p_value < 0.001:
+        return '***'
+    elif p_value < 0.01:
+        return '**'
+    elif p_value < 0.05:
+        return '*'
+    return ''
+
+
 def boxplot_metric_family(metric_dict: Dict[int, List[float]], title_prefix: str, label: str,
                           save_path: Optional[Path] = None) -> None:
     """

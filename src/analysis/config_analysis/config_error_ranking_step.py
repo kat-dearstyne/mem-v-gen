@@ -1,21 +1,17 @@
 import random
 from collections import namedtuple
-from enum import Enum
-from typing import Dict, List, Any, Optional, Set
+from typing import Dict, List, Any, Optional, Set, TYPE_CHECKING
 
 import numpy as np
 from scipy.stats import mannwhitneyu
 
 from src.analysis.config_analysis.config_analyze_step import ConfigAnalyzeStep
 from src.graph_manager import GraphManager
-from src.utils import Metrics
+from src.metrics import ErrorRankingMetrics
+from src.utils import create_label_from_conditions
 
-
-class ErrorRankingMetrics(Metrics):
-    MANN_WHITNEY = "mann_whitney"
-    TOP_K = "top_k_error_proportion"
-    NDCG = "ndcg"
-    AP = "average_precision"
+if TYPE_CHECKING:
+    from src.graph_analyzer import GraphAnalyzer
 
 
 MannWhitneyResult = namedtuple("MannWhitneyResult",
@@ -30,14 +26,25 @@ class ConfigErrorRankingStep(ConfigAnalyzeStep):
     ALL_METRICS = [ErrorRankingMetrics.TOP_K, ErrorRankingMetrics.NDCG, ErrorRankingMetrics.AP]
     K_METRICS = [ErrorRankingMetrics.TOP_K, ErrorRankingMetrics.NDCG]
 
-    def __init__(self, metrics2run: Set[ErrorRankingMetrics] = None, use_same_token: bool = True):
+    def __init__(self,
+                 graph_analyzer: "GraphAnalyzer",
+                 main_prompt_id: str,
+                 comparison_prompt_ids: List[str] = None,
+                 metrics2run: Set[ErrorRankingMetrics] = None,
+                 use_same_token: bool = True,
+                 **kwargs):
         """
         Initializes the config error ranking step.
 
         Args:
+            graph_analyzer: GraphAnalyzer instance with loaded graphs.
+            main_prompt_id: The main prompt ID to compare from.
+            comparison_prompt_ids: Prompt IDs to compare against. If None, compares against all other prompts.
             metrics2run: Set of metrics to compute.
             use_same_token: Whether to use the same output token for both graphs.
         """
+        self.main_prompt_id = main_prompt_id
+        self.comparison_prompt_ids = comparison_prompt_ids
         self.metrics2run = {e for e in ErrorRankingMetrics} if not metrics2run else metrics2run
         self.use_same_token = use_same_token
         self.metric_fns = {
@@ -45,21 +52,28 @@ class ConfigErrorRankingStep(ConfigAnalyzeStep):
             ErrorRankingMetrics.NDCG: self.ndcg_at_k,
             ErrorRankingMetrics.AP: self.average_precision,
         }
-        super().__init__()
+        super().__init__(graph_analyzer=graph_analyzer, **kwargs)
 
-    def run(self, graphs: List[GraphManager], conditions: List[str] = None) -> Dict:
+    def run(self) -> Dict:
         """
-        Runs the error ranking analysis on the provided graphs.
-
-        Args:
-            graphs: List of graphs to run analysis on.
-            conditions: Conditions corresponding with each graph.
-
+        Runs the error ranking analysis comparing main prompt to other prompts.
 
         Returns:
-            Dictionary of results.
+            Dictionary mapping comparison labels to results.
         """
-        return self._run_error_ranking(graphs, self.use_same_token)
+        results = {}
+        comparison_ids = self.comparison_prompt_ids or [
+            p_id for p_id in self.graph_analyzer.graphs.keys()
+            if p_id != self.main_prompt_id
+        ]
+
+        main_graph = self.graph_analyzer.graphs[self.main_prompt_id]
+        for comp_id in comparison_ids:
+            comp_graph = self.graph_analyzer.graphs[comp_id]
+            label = create_label_from_conditions(self.main_prompt_id, comp_id)
+            results[label] = self._run_error_ranking([main_graph, comp_graph], self.use_same_token)
+
+        return results
 
     def _run_error_ranking(self, graphs: List[GraphManager], use_same_token: bool = True) -> Dict:
         """
@@ -104,7 +118,7 @@ class ConfigErrorRankingStep(ConfigAnalyzeStep):
         # Handle Mann-Whitney separately (doesn't use permutation test)
         if ErrorRankingMetrics.MANN_WHITNEY in self.metrics2run:
             print(f"Running error test for {ErrorRankingMetrics.MANN_WHITNEY.value}.")
-            results[ErrorRankingMetrics.MANN_WHITNEY.value] = self.error_rank_mannwhitney(nodes1, nodes2)
+            results[ErrorRankingMetrics.MANN_WHITNEY] = self.error_rank_mannwhitney(nodes1, nodes2)
 
         # Process permutation test metrics
         for metric in self.ALL_METRICS:
@@ -114,16 +128,16 @@ class ConfigErrorRankingStep(ConfigAnalyzeStep):
             base_fn = self.metric_fns[metric]
 
             if metric in self.K_METRICS:
-                results[metric.value] = {}
+                results[metric] = {}
                 for k in ks:
                     print(f"Running error analysis for {metric.value} @ {k}")
                     metric_fn = lambda g, k=k: base_fn(g, k)
-                    results[metric.value][k] = self.permutation_test_metric(
+                    results[metric][k] = self.permutation_test_metric(
                         nodes1, nodes2, metric_fn, n_permutations
                     )
             else:
                 print(f"Running error test for {metric.value}.")
-                results[metric.value] = self.permutation_test_metric(
+                results[metric] = self.permutation_test_metric(
                     nodes1, nodes2, base_fn, n_permutations
                 )
 

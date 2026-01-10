@@ -4,13 +4,22 @@ from typing import Dict, Type, Any
 
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
 from src.analysis.cross_config_analysis.cross_config_analyze_step import CrossConfigAnalyzeStep
+from src.analysis.cross_config_analysis.cross_config_early_layer_contribution_step import (
+    CrossConfigEarlyLayerContributionStep
+)
 from src.analysis.cross_config_analysis.cross_config_error_ranking_step import CrossConfigErrorRankingStep
-from src.analysis.cross_config_analysis.cross_config_replacement_model_accuracy_step import \
+from src.analysis.cross_config_analysis.cross_config_feature_overlap_step import CrossConfigFeatureOverlapStep
+from src.analysis.cross_config_analysis.cross_config_replacement_model_accuracy_step import (
     CrossConfigReplacementModelAccuracyStep
+)
+from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import CrossConfigSubgraphFilterStep
 
 STEP2CLASS: Dict[SupportedConfigAnalyzeStep, Type[CrossConfigAnalyzeStep]] = {
+    SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION: CrossConfigEarlyLayerContributionStep,
     SupportedConfigAnalyzeStep.ERROR_RANKING: CrossConfigErrorRankingStep,
-    SupportedConfigAnalyzeStep.REPLACEMENT_MODEL: CrossConfigReplacementModelAccuracyStep
+    SupportedConfigAnalyzeStep.FEATURE_OVERLAP: CrossConfigFeatureOverlapStep,
+    SupportedConfigAnalyzeStep.REPLACEMENT_MODEL: CrossConfigReplacementModelAccuracyStep,
+    SupportedConfigAnalyzeStep.SUBGRAPH_FILTER: CrossConfigSubgraphFilterStep,
 }
 
 
@@ -28,7 +37,7 @@ class CrossConfigAnalyzer:
         self.config_results = config_results
         self.save_path = save_path
 
-    def run(self, **step_params):
+    def run(self, **step_params) -> Dict[SupportedConfigAnalyzeStep, Any]:
         """
         Runs all registered cross-config analysis steps.
 
@@ -36,7 +45,7 @@ class CrossConfigAnalyzer:
             **step_params: Additional parameters passed to step constructors.
 
         Returns:
-            Dictionary mapping step name to results.
+            Dictionary mapping SupportedConfigAnalyzeStep enum to results.
         """
         if self.save_path:
             os.makedirs(self.save_path, exist_ok=True)
@@ -45,5 +54,5 @@ class CrossConfigAnalyzer:
             step: CrossConfigAnalyzeStep = step_cls(save_path=self.save_path, **step_params)
             step_result = step.run(self.config_results)
             if step_result is not None:
-                all_results[step_type.name] = step_result
+                all_results[step_type] = step_result
         return all_results

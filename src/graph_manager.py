@@ -1,6 +1,6 @@
 import re
 from collections import namedtuple
-from typing import List, Set, Dict, Any, Optional
+from typing import Any, Dict, List, Optional, Set, Union
 
 import pandas as pd
 
@@ -106,7 +106,7 @@ class GraphManager:
         ctx_freq_df = node_df_clts_only.value_counts(["layer", "feature"]).reset_index(name="ctx_freq")
         return ctx_freq_df
 
-    def get_node_dict(self) -> dict[Any, Any]:
+    def get_node_dict(self) -> Dict[str, Dict[str, Any]]:
         """
         Get a dictionary mapping node_id to node.
 
@@ -193,7 +193,30 @@ class GraphManager:
             links = sorted(links, key=lambda link: link['weight'], reverse=True)
         return [all_nodes[link['source']] for link in links]
 
-    def get_top_output_logit_node(self) -> Any:
+    def get_features_linked_to_tokens(self, tok_k_outputs: int) -> Dict[str, Set[str]]:
+        """
+        Get all features linked to the top k output tokens.
+
+        Args:
+            tok_k_outputs: Number of top output logits to analyze.
+
+        Returns:
+            Dict mapping output tokens to sets of all linked node ids.
+        """
+        output_nodes = self.get_output_logits()
+        top_nodes = output_nodes[:tok_k_outputs]
+
+        output_token_to_id = {self.get_output_token_from_clerp(node): node["node_id"] for node in top_nodes}
+        output_token_to_linked_features = {token: {node_id} for token, node_id in output_token_to_id.items()}
+
+        ## Update output_token_to_linked_features with a set of linked features for each output token
+        newly_added = True
+        while newly_added:
+            newly_added = self.get_linked_sources(output_token_to_linked_features, positive_only=True)
+
+        return output_token_to_linked_features
+
+    def get_top_output_logit_node(self) -> Dict[str, Any]:
         """
         Get the target output logit node.
 
@@ -202,7 +225,7 @@ class GraphManager:
         """
         return [node for node in self.nodes if node['is_target_logit']][0]
 
-    def get_output_logits(self) -> Any:
+    def get_output_logits(self) -> List[Dict[str, Any]]:
         """
         Get all output logit nodes.
 
@@ -211,20 +234,23 @@ class GraphManager:
         """
         return [node for node in self.nodes if node['feature_type'] == "logit"]
 
-    def find_output_node(self, node_to_find: Dict) -> Dict[str, Any]:
+    def find_output_node(self, node_to_find: Dict, raise_if_not_found: bool = False) -> Optional[Dict[str, Any]]:
         """
         Finds matching output node if it exists.
 
         Args:
             node_to_find: Find node with same id.
+            raise_if_not_found: If True, raises AssertionError when no match found.
 
         Returns:
-            The output node if it is found.
+            The output node if it is found, None otherwise.
         """
         found_nodes = [node for node in self.get_output_logits() if
                          node['node_id'].startswith(GraphManager.get_id_without_pos(node_to_find['node_id']))]
-        assert len(found_nodes) >= 1, (f"Can't find node corresponding with {node_to_find['clerp']} in "
-                                             f"prompt.")
+        if not found_nodes:
+            if raise_if_not_found:
+                raise AssertionError(f"Can't find node corresponding with {node_to_find['clerp']} in prompt.")
+            return None
         return found_nodes[0]
 
     @staticmethod
@@ -269,8 +295,7 @@ class GraphManager:
         split_node_id = node_id.split(deliminator)
         return Feature(split_node_id[0], split_node_id[1])
 
-    @staticmethod
-    def get_output_token_from_clerp(output_node: dict) -> str:
+    def get_output_token_from_clerp(self, output_node: dict = None) -> str:
         """
         Extract the output token from a node's clerp attribute.
 
@@ -280,6 +305,7 @@ class GraphManager:
         Returns:
             The extracted token string.
         """
+        output_node = output_node if output_node else self.get_top_output_logit_node()
         match = re.search(r'"(.*?)"', output_node["clerp"])
         if match:
             token = match.group(1).strip()
@@ -302,7 +328,7 @@ class GraphManager:
         return len(node_df[(node_df['layer'] == layer) & (node_df['feature'] == feature)]) > 0
 
     @staticmethod
-    def get_id_without_pos(node_name: str) -> Any:
+    def get_id_without_pos(node_name: str) -> str:
         """
         Remove the position suffix from a node id.
 
@@ -317,7 +343,8 @@ class GraphManager:
         return node_name
 
     @staticmethod
-    def get_links_to_targets(target_ids: List | Set, target_id_to_links: Dict, links: list, allowed_nodes: set):
+    def get_links_to_targets(target_ids: Union[List[str], Set[str]], target_id_to_links: Dict[str, List[Dict]],
+                             links: List[Dict], allowed_nodes: Set[str]) -> Set[str]:
         """
         Get links to specified target ids and collect new source targets.
 

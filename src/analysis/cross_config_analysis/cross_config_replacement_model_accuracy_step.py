@@ -9,11 +9,11 @@ from wordfreq import zipf_frequency
 
 from src.constants import TOP_K
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
-from src.analysis.config_analysis.config_replacement_model_accuracy_step import ReplacementAccuracyMetrics, \
-    ConfigReplacementModelAccuracyStep
+from src.analysis.config_analysis.config_replacement_model_accuracy_step import ConfigReplacementModelAccuracyStep
 from src.analysis.cross_config_analysis.cross_config_analyze_step import CrossConfigAnalyzeStep
-from src.utils import load_json, Metrics, create_label_from_conditions, get_as_safe_name
-from visualizations import plot_error_hypothesis_combined_boxplot, plot_error_hypothesis_metrics, \
+from src.metrics import Metrics, ReplacementAccuracyMetrics, ComplexityMetrics
+from src.utils import load_json, create_label_from_conditions, get_as_safe_name
+from src.visualizations import plot_error_hypothesis_combined_boxplot, plot_error_hypothesis_metrics, \
     plot_significance_effect_sizes, plot_omnibus_effect_sizes, plot_per_position_curves, plot_token_complexity
 
 SignificanceStats = namedtuple("SignificanceStats", [
@@ -27,12 +27,6 @@ OmnibusSignificanceResult = namedtuple("OmnibusSignificanceResult", [
     "f_statistic", "anova_p_value", "anova_significant", "eta_squared",
     "h_statistic", "kruskal_p_value", "kruskal_significant", "epsilon_squared"
 ])
-
-
-class ComplexityMetrics(Metrics):
-    """Metrics for measuring token complexity."""
-    ZIPF_FREQUENCY = "zipf_frequency"
-    TOKEN_LENGTH = "token_length"
 
 
 class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
@@ -67,6 +61,9 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
         Returns:
             Dictionary of analysis results, or None if no cached results exist.
         """
+        if self.save_path is None:
+            return None
+
         output_path = self.save_path / "error_hypothesis_analysis.json"
         if output_path.exists() and (results := load_json(output_path)):
             for config, res in results.items():
