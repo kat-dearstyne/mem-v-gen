@@ -29,7 +29,7 @@ class CrossConditionSharedFeaturesVisualizationStep(CrossConditionAnalyzeStep):
         Returns:
             Combined DataFrame of shared feature metrics, or None if no data.
         """
-        combined_df = self.combine_condition_dataframes(condition_results, add_condition_as_prompt_type=True)
+        combined_df = self.combine_condition_dataframes(condition_results)
 
         if combined_df is None or combined_df.empty:
             return None

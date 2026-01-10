@@ -75,8 +75,7 @@ class CrossConditionOverlapVisualizationStep(CrossConditionAnalyzeStep):
         Returns:
             Combined DataFrame of intersection metrics, or None if no data.
         """
-        # Use add_condition_as_prompt_type=False since intersection_metrics already has prompt_type
-        combined_df = self.combine_condition_dataframes(condition_results, add_condition_as_prompt_type=False)
+        combined_df = self.combine_condition_dataframes(condition_results)
 
         if combined_df is None or combined_df.empty:
             return None

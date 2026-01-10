@@ -9,6 +9,8 @@ from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import
     CONFIG_NAME_COL, PROMPT_TYPE_COL
 )
 
+DEFAULT_CONDITION_COL = "condition"
+
 
 class CrossConditionAnalyzeStep(abc.ABC):
     """
@@ -21,6 +23,7 @@ class CrossConditionAnalyzeStep(abc.ABC):
     # Subclasses should override these to specify which data to extract
     CONFIG_RESULTS_KEY: SupportedConfigAnalyzeStep = None
     RESULTS_SUB_KEY: Optional[str] = None  # For nested results (e.g., "intersection_metrics")
+    CONDITION_COL: str = DEFAULT_CONDITION_COL  # Column name for condition grouping
 
     def __init__(self, save_path: Path = None,
                  condition_order: Optional[List[str]] = None,
@@ -56,20 +59,19 @@ class CrossConditionAnalyzeStep(abc.ABC):
     def combine_condition_dataframes(
             self,
             condition_results: Dict[str, Dict[SupportedConfigAnalyzeStep, Any]],
-            add_condition_as_prompt_type: bool = True
     ) -> Optional[pd.DataFrame]:
         """
         Extracts and combines DataFrames from all conditions.
 
         Uses CONFIG_RESULTS_KEY and RESULTS_SUB_KEY to locate the DataFrame
-        in each condition's results.
+        in each condition's results. Adds a 'condition' column to distinguish
+        between different conditions (e.g., submodels).
 
         Args:
             condition_results: Dictionary mapping condition names to CrossConfigAnalyzer results.
-            add_condition_as_prompt_type: If True, adds condition name as prompt_type column.
 
         Returns:
-            Combined DataFrame, or None if no data found.
+            Combined DataFrame with 'condition' column, or None if no data found.
         """
         if self.CONFIG_RESULTS_KEY is None:
             return None
@@ -83,9 +85,8 @@ class CrossConditionAnalyzeStep(abc.ABC):
 
             df = df.copy()
 
-            # Add condition name as prompt_type if requested
-            if add_condition_as_prompt_type:
-                df[PROMPT_TYPE_COL] = condition_name
+            # Add condition name as separate column
+            df[self.CONDITION_COL] = condition_name
 
             dfs.append(df)
 
@@ -136,7 +137,7 @@ class CrossConditionAnalyzeStep(abc.ABC):
         Gets condition and config ordering, using provided values or deriving from data.
 
         Args:
-            df: DataFrame with prompt_type and config_name columns.
+            df: DataFrame with condition and config_name columns.
 
         Returns:
             Tuple of (condition_order, config_order).
@@ -144,8 +145,8 @@ class CrossConditionAnalyzeStep(abc.ABC):
         condition_order = self.condition_order
         config_order = self.config_order
 
-        if condition_order is None and PROMPT_TYPE_COL in df.columns:
-            condition_order = sorted(df[PROMPT_TYPE_COL].unique().tolist())
+        if condition_order is None and self.CONDITION_COL in df.columns:
+            condition_order = sorted(df[self.CONDITION_COL].unique().tolist())
 
         if config_order is None and CONFIG_NAME_COL in df.columns:
             config_order = sorted(df[CONFIG_NAME_COL].unique().tolist())

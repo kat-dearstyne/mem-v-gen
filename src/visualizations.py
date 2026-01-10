@@ -325,7 +325,7 @@ def plot_metric_line(df: pd.DataFrame,
     palette = get_palette(len(condition_order))
 
     for i, condition in enumerate(condition_order):
-        cond_df = df[df['prompt_type'] == condition].set_index('config_name')
+        cond_df = df[df[condition_col] == condition].set_index('config_name')
         cond_df = cond_df.reindex(config_order)
 
         ax.plot(config_order, cond_df[metric_col],
@@ -514,12 +514,13 @@ def plot_correlation_heatmap(df: pd.DataFrame,
 def plot_combined_metrics(df: pd.DataFrame,
                           save_dir: Optional[Path] = None,
                           condition_order: Optional[List[str]] = None,
-                          config_order: Optional[List[str]] = None) -> None:
+                          config_order: Optional[List[str]] = None,
+                          condition_col: str = 'prompt_type') -> None:
     """
     Creates all visualizations for combined overlap metrics (unique/shared fractions).
     """
     if condition_order is None:
-        condition_order = sorted(df['prompt_type'].unique().tolist())
+        condition_order = sorted(df[condition_col].unique().tolist())
     if config_order is None:
         config_order = sorted(df['config_name'].unique().tolist())
 
@@ -528,7 +529,7 @@ def plot_combined_metrics(df: pd.DataFrame,
     # Line plot for unique_frac by condition
     fig, ax = plt.subplots(figsize=(10, 6))
     for i, condition in enumerate(condition_order):
-        cond_df = df[df['prompt_type'] == condition].set_index('config_name')
+        cond_df = df[df[condition_col] == condition].set_index('config_name')
         cond_df = cond_df.reindex(config_order)
         ax.plot(config_order, cond_df['unique_frac'],
                 marker='o', markersize=8, linewidth=2,
@@ -553,7 +554,7 @@ def plot_combined_metrics(df: pd.DataFrame,
     # Line plot for shared_frac by condition
     fig, ax = plt.subplots(figsize=(10, 6))
     for i, condition in enumerate(condition_order):
-        cond_df = df[df['prompt_type'] == condition].set_index('config_name')
+        cond_df = df[df[condition_col] == condition].set_index('config_name')
         cond_df = cond_df.reindex(config_order)
         ax.plot(config_order, cond_df['shared_frac'],
                 marker='o', markersize=8, linewidth=2,
@@ -580,7 +581,7 @@ def plot_combined_metrics(df: pd.DataFrame,
 
     ax = axes[0]
     for i, condition in enumerate(condition_order):
-        cond_df = df[df['prompt_type'] == condition].set_index('config_name')
+        cond_df = df[df[condition_col] == condition].set_index('config_name')
         cond_df = cond_df.reindex(config_order)
         ax.plot(config_order, cond_df['unique_weighted_frac'],
                 marker='o', markersize=8, linewidth=2,
@@ -596,7 +597,7 @@ def plot_combined_metrics(df: pd.DataFrame,
 
     ax = axes[1]
     for i, condition in enumerate(condition_order):
-        cond_df = df[df['prompt_type'] == condition].set_index('config_name')
+        cond_df = df[df[condition_col] == condition].set_index('config_name')
         cond_df = cond_df.reindex(config_order)
         ax.plot(config_order, cond_df['shared_weighted_frac'],
                 marker='o', markersize=8, linewidth=2,
@@ -620,27 +621,28 @@ def plot_combined_metrics(df: pd.DataFrame,
 
     # Additional plots
     plot_combined_boxplot(df, save_path=save_dir / "combined_boxplot.png" if save_dir else None,
-                          condition_order=condition_order)
+                          condition_order=condition_order, condition_col=condition_col)
     plot_combined_bar(df, save_path=save_dir / "combined_bar.png" if save_dir else None,
-                      condition_order=condition_order, config_order=config_order)
+                      condition_order=condition_order, config_order=config_order, condition_col=condition_col)
     plot_combined_heatmap(df, save_path=save_dir / "combined_heatmap.png" if save_dir else None,
-                          condition_order=condition_order, config_order=config_order)
+                          condition_order=condition_order, config_order=config_order, condition_col=condition_col)
 
 
 def plot_combined_boxplot(df: pd.DataFrame,
                            save_path: Optional[Path] = None,
-                           condition_order: Optional[List[str]] = None) -> None:
+                           condition_order: Optional[List[str]] = None,
+                           condition_col: str = 'prompt_type') -> None:
     """
     Creates boxplots comparing unique/shared fractions across conditions.
     """
     if condition_order is None:
-        condition_order = sorted(df['prompt_type'].unique().tolist())
+        condition_order = sorted(df[condition_col].unique().tolist())
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
     # Unique fraction boxplot
     ax = axes[0]
-    sns.boxplot(data=df, x='prompt_type', y='unique_frac', hue='prompt_type',
+    sns.boxplot(data=df, x=condition_col, y='unique_frac', hue=condition_col,
                 order=condition_order, hue_order=condition_order,
                 palette=get_palette(len(condition_order)), legend=False, ax=ax)
     ax.set_title('Unique Feature Fraction by Condition', pad=15)
@@ -651,7 +653,7 @@ def plot_combined_boxplot(df: pd.DataFrame,
 
     # Shared fraction boxplot
     ax = axes[1]
-    sns.boxplot(data=df, x='prompt_type', y='shared_frac', hue='prompt_type',
+    sns.boxplot(data=df, x=condition_col, y='shared_frac', hue=condition_col,
                 order=condition_order, hue_order=condition_order,
                 palette=get_palette(len(condition_order)), legend=False, ax=ax)
     ax.set_title('Shared Feature Fraction by Condition', pad=15)
@@ -672,12 +674,13 @@ def plot_combined_boxplot(df: pd.DataFrame,
 def plot_combined_bar(df: pd.DataFrame,
                        save_path: Optional[Path] = None,
                        condition_order: Optional[List[str]] = None,
-                       config_order: Optional[List[str]] = None) -> None:
+                       config_order: Optional[List[str]] = None,
+                       condition_col: str = 'prompt_type') -> None:
     """
     Creates grouped bar charts comparing unique/shared fractions across conditions for each config.
     """
     if condition_order is None:
-        condition_order = sorted(df['prompt_type'].unique().tolist())
+        condition_order = sorted(df[condition_col].unique().tolist())
     if config_order is None:
         config_order = sorted(df['config_name'].unique().tolist())
 
@@ -685,7 +688,7 @@ def plot_combined_bar(df: pd.DataFrame,
 
     # Unique fraction bar chart
     ax = axes[0]
-    pivot_df = df.pivot(index='config_name', columns='prompt_type', values='unique_frac')
+    pivot_df = df.pivot(index='config_name', columns=condition_col, values='unique_frac')
     pivot_df = pivot_df.reindex(config_order)[condition_order]
     x = np.arange(len(config_order))
     width = 0.8 / len(condition_order)
@@ -705,7 +708,7 @@ def plot_combined_bar(df: pd.DataFrame,
 
     # Shared fraction bar chart
     ax = axes[1]
-    pivot_df = df.pivot(index='config_name', columns='prompt_type', values='shared_frac')
+    pivot_df = df.pivot(index='config_name', columns=condition_col, values='shared_frac')
     pivot_df = pivot_df.reindex(config_order)[condition_order]
     for i, condition in enumerate(condition_order):
         offset = (i - len(condition_order)/2 + 0.5) * width
@@ -732,12 +735,13 @@ def plot_combined_bar(df: pd.DataFrame,
 def plot_combined_heatmap(df: pd.DataFrame,
                            save_path: Optional[Path] = None,
                            condition_order: Optional[List[str]] = None,
-                           config_order: Optional[List[str]] = None) -> None:
+                           config_order: Optional[List[str]] = None,
+                           condition_col: str = 'prompt_type') -> None:
     """
     Creates heatmaps for unique/shared fractions by config and condition.
     """
     if condition_order is None:
-        condition_order = sorted(df['prompt_type'].unique().tolist())
+        condition_order = sorted(df[condition_col].unique().tolist())
     if config_order is None:
         config_order = sorted(df['config_name'].unique().tolist())
 
@@ -745,7 +749,7 @@ def plot_combined_heatmap(df: pd.DataFrame,
 
     # Unique fraction heatmap
     ax = axes[0]
-    pivot_df = df.pivot(index='config_name', columns='prompt_type', values='unique_frac')
+    pivot_df = df.pivot(index='config_name', columns=condition_col, values='unique_frac')
     pivot_df = pivot_df.reindex(config_order)[condition_order]
     sns.heatmap(pivot_df, annot=True, fmt='.2f', cmap='YlOrRd',
                 vmin=0, vmax=1, ax=ax, cbar_kws={'label': 'Fraction'})
@@ -755,7 +759,7 @@ def plot_combined_heatmap(df: pd.DataFrame,
 
     # Shared fraction heatmap
     ax = axes[1]
-    pivot_df = df.pivot(index='config_name', columns='prompt_type', values='shared_frac')
+    pivot_df = df.pivot(index='config_name', columns=condition_col, values='shared_frac')
     pivot_df = pivot_df.reindex(config_order)[condition_order]
     sns.heatmap(pivot_df, annot=True, fmt='.2f', cmap='YlOrRd',
                 vmin=0, vmax=1, ax=ax, cbar_kws={'label': 'Fraction'})
@@ -775,13 +779,14 @@ def plot_combined_heatmap(df: pd.DataFrame,
 def plot_shared_feature_metrics(df: pd.DataFrame,
                                  save_dir: Optional[Path] = None,
                                  condition_order: Optional[List[str]] = None,
-                                 config_order: Optional[List[str]] = None) -> None:
+                                 config_order: Optional[List[str]] = None,
+                                 condition_col: str = 'prompt_type') -> None:
     """
     Creates visualizations for shared feature metrics across conditions.
     Includes threshold curve visualizations showing feature counts at different sharing thresholds.
     """
     if condition_order is None:
-        condition_order = sorted(df['prompt_type'].unique().tolist())
+        condition_order = sorted(df[condition_col].unique().tolist())
     if config_order is None:
         config_order = sorted(df['config_name'].unique().tolist())
 
@@ -797,7 +802,7 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
     n_conditions = len(condition_order)
     x_offset_range = 1.5  # total offset range
     for i, condition in enumerate(condition_order):
-        cond_df = df[df['prompt_type'] == condition]
+        cond_df = df[df[condition_col] == condition]
         means = [cond_df[col].mean() for col in threshold_cols]
         # Apply small x-offset to separate overlapping lines
         x_offset = (i - (n_conditions - 1) / 2) * (x_offset_range / max(n_conditions - 1, 1))
@@ -827,7 +832,7 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
         axes = [axes]
     for ax, config in zip(axes, config_order):
         for i, condition in enumerate(condition_order):
-            cond_df = df[(df['prompt_type'] == condition) & (df['config_name'] == config)]
+            cond_df = df[(df[condition_col] == condition) & (df['config_name'] == config)]
             if len(cond_df) > 0:
                 counts = [cond_df[col].values[0] for col in threshold_cols]
                 ax.plot(thresholds, counts, marker='o', markersize=6, linewidth=2,
@@ -856,7 +861,7 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
     width = 0.8 / len(condition_order)
 
     for i, condition in enumerate(condition_order):
-        cond_df = df[df['prompt_type'] == condition].set_index('config_name').reindex(config_order)
+        cond_df = df[df[condition_col] == condition].set_index('config_name').reindex(config_order)
         means, stds, mins, maxs = [], [], [], []
         for config in config_order:
             if config in cond_df.index:
@@ -1279,33 +1284,38 @@ def _save_sig_figure(fig, save_path: Path, title: str, legend_labels: tuple) -> 
 def plot_significance_effect_sizes(df: pd.DataFrame,
                                     title: str,
                                     save_path: Path,
-                                    exclude_metrics: Optional[List[str]] = None) -> None:
+                                    exclude_metrics: Optional[List[str]] = None,
+                                    t_sig_col: str = "t_significant_bh",
+                                    mw_sig_col: str = "mw_significant_bh") -> None:
     """
     Plot pairwise significance with Cohen's d and rank-biserial r effect sizes.
 
-    Uses BH-corrected p-values for significance determination.
-
     Args:
-        df: DataFrame with columns: metric, t_significant_bh, mw_significant_bh, cohens_d, rank_biserial_r
+        df: DataFrame with columns: metric, cohens_d, rank_biserial_r, and significance columns
         title: Title for the plot
         save_path: Path to save the visualization
         exclude_metrics: List of metrics to exclude
+        t_sig_col: Column name for t-test significance
+        mw_sig_col: Column name for Mann-Whitney significance
     """
-    plot_df = _prepare_sig_plot_df(df, exclude_metrics, "t_significant_bh", "mw_significant_bh")
+    plot_df = _prepare_sig_plot_df(df, exclude_metrics, t_sig_col, mw_sig_col)
     if plot_df.empty:
         return
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    _plot_effect_size_bar(axes[0], plot_df, "cohens_d", "t_significant_bh", "mw_significant_bh",
+    t_label = "T-test (BH)" if "bh" in t_sig_col else "T-test"
+    mw_label = "MW (BH)" if "bh" in mw_sig_col else "Mann-Whitney"
+
+    _plot_effect_size_bar(axes[0], plot_df, "cohens_d", t_sig_col, mw_sig_col,
                           "|Cohen's d|", "Effect Size: Cohen's d",
                           [(0.2, '#999'), (0.5, '#666'), (0.8, '#333')])
 
-    _plot_effect_size_bar(axes[1], plot_df, "rank_biserial_r", "t_significant_bh", "mw_significant_bh",
+    _plot_effect_size_bar(axes[1], plot_df, "rank_biserial_r", t_sig_col, mw_sig_col,
                           "|Rank-biserial r|", "Effect Size: Rank-biserial r",
                           [(0.1, '#999'), (0.3, '#666'), (0.5, '#333')])
 
-    _save_sig_figure(fig, save_path, title, ("T-test (BH)", "MW (BH)"))
+    _save_sig_figure(fig, save_path, title, (t_label, mw_label))
 
 
 def plot_omnibus_effect_sizes(df: pd.DataFrame,

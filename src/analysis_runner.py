@@ -371,7 +371,7 @@ def run_cross_condition_analysis(
         config_dir = config_dirs[0] if config_dirs else ""
 
         for submodel_num in submodel_nums:
-            condition_name = f"submodel_{submodel_num}"
+            condition_name = SUBMODELS[submodel_num]
             print(f"\n{'='*50}")
             print(f"Running condition: {condition_name}")
             print(f"{'='*50}")

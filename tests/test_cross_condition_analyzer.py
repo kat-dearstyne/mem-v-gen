@@ -23,6 +23,7 @@ from src.analysis.cross_condition_analysis.cross_condition_shared_features_visua
 from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import (
     CONFIG_NAME_COL, PROMPT_TYPE_COL, SHARED_FEATURES_KEY
 )
+from src.analysis.cross_condition_analysis.cross_condition_analyze_step import DEFAULT_CONDITION_COL as CONDITION_COL
 from src.metrics import ComparisonMetrics, FeatureSharingMetrics
 
 
@@ -100,8 +101,8 @@ class TestCrossConditionAnalyzeStep(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    def test_combine_condition_dataframes_adds_prompt_type(self):
-        """Test that combine_condition_dataframes adds condition name as prompt_type."""
+    def test_combine_condition_dataframes_adds_condition_column(self):
+        """Test that combine_condition_dataframes adds condition name as condition column."""
         condition_results = {
             "cond1": {
                 SupportedConfigAnalyzeStep.FEATURE_OVERLAP: pd.DataFrame({
@@ -118,10 +119,10 @@ class TestCrossConditionAnalyzeStep(unittest.TestCase):
         }
 
         step = CrossConditionFeatureOverlapVisualizationStep()
-        result = step.combine_condition_dataframes(condition_results, add_condition_as_prompt_type=True)
+        result = step.combine_condition_dataframes(condition_results)
 
-        self.assertIn(PROMPT_TYPE_COL, result.columns)
-        self.assertEqual(set(result[PROMPT_TYPE_COL].unique()), {"cond1", "cond2"})
+        self.assertIn(CONDITION_COL, result.columns)
+        self.assertEqual(set(result[CONDITION_COL].unique()), {"cond1", "cond2"})
 
     def test_combine_condition_dataframes_normalizes_config_names(self):
         """Test that combine_condition_dataframes strips directory prefixes."""
@@ -142,7 +143,7 @@ class TestCrossConditionAnalyzeStep(unittest.TestCase):
     def test_get_ordering_derives_from_data(self):
         """Test that get_ordering derives order from DataFrame when not provided."""
         df = pd.DataFrame({
-            PROMPT_TYPE_COL: ["b", "a", "c"],
+            CONDITION_COL: ["b", "a", "c"],
             CONFIG_NAME_COL: ["cfg2", "cfg1", "cfg3"]
         })
 
@@ -155,7 +156,7 @@ class TestCrossConditionAnalyzeStep(unittest.TestCase):
     def test_get_ordering_uses_provided_values(self):
         """Test that get_ordering uses provided values over derived ones."""
         df = pd.DataFrame({
-            PROMPT_TYPE_COL: ["b", "a"],
+            CONDITION_COL: ["b", "a"],
             CONFIG_NAME_COL: ["cfg2", "cfg1"]
         })
 
@@ -251,8 +252,8 @@ class TestCrossConditionFeatureOverlapVisualizationStep(unittest.TestCase):
         self.assertIsNone(result)
 
     @patch('src.analysis.cross_condition_analysis.cross_condition_feature_overlap_visualization_step.plot_combined_metrics')
-    def test_run_adds_prompt_type_column(self, mock_plot):
-        """Test that run adds prompt_type column from condition names."""
+    def test_run_adds_condition_column(self, mock_plot):
+        """Test that run adds condition column from condition names."""
         condition_results = {
             "cond1": {
                 SupportedConfigAnalyzeStep.FEATURE_OVERLAP: TestCrossConditionAnalyzerFixtures.create_feature_overlap_df()
@@ -262,8 +263,8 @@ class TestCrossConditionFeatureOverlapVisualizationStep(unittest.TestCase):
         step = CrossConditionFeatureOverlapVisualizationStep()
         result = step.run(condition_results)
 
-        self.assertIn(PROMPT_TYPE_COL, result.columns)
-        self.assertEqual(result[PROMPT_TYPE_COL].unique()[0], "cond1")
+        self.assertIn(step.CONDITION_COL, result.columns)
+        self.assertEqual(result[step.CONDITION_COL].unique()[0], "cond1")
 
 
 class TestCrossConditionSharedFeaturesVisualizationStep(unittest.TestCase):

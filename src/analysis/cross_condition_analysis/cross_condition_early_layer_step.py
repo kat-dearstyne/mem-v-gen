@@ -6,18 +6,24 @@ import pandas as pd
 from scipy import stats
 
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
-from src.analysis.cross_condition_analysis.cross_condition_analyze_step import CrossConditionAnalyzeStep
-from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import CONFIG_NAME_COL, PROMPT_TYPE_COL
+from src.analysis.cross_condition_analysis.cross_condition_analyze_step import (
+    CrossConditionAnalyzeStep
+)
+from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import CONFIG_NAME_COL
 from src.analysis.cross_config_analysis.cross_config_early_layer_contribution_step import EARLY_LAYER_FRACTION_COL
 from src.visualizations import (
     plot_early_layer_boxplot,
     plot_early_layer_mean_comparison,
-    plot_early_layer_by_config
+    plot_early_layer_by_config,
+    plot_significance_effect_sizes
 )
 
 # Output filenames
 EARLY_LAYER_COMPARISON_FILENAME = "early_layer_comparison.csv"
 EARLY_LAYER_STATS_FILENAME = "early_layer_stats.csv"
+EARLY_LAYER_SIGNIFICANCE_FILENAME = "early_layer_significance.csv"
+
+SIGNIFICANCE_THRESHOLD = 0.05
 
 
 class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
@@ -41,7 +47,7 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
         Returns:
             Dictionary with combined DataFrame and statistical results, or None if no data.
         """
-        combined_df = self.combine_condition_dataframes(condition_results, add_condition_as_prompt_type=False)
+        combined_df = self.combine_condition_dataframes(condition_results)
 
         if combined_df is None or combined_df.empty:
             return None
@@ -76,7 +82,7 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
             condition_order: Order of conditions.
 
         Returns:
-            Dictionary with statistical test results.
+            Dictionary with statistical test results and significance DataFrame.
         """
         results = {}
 
@@ -86,7 +92,7 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
         # Get data for each condition
         condition_data = {}
         for condition in condition_order:
-            cond_df = df[df[PROMPT_TYPE_COL] == condition]
+            cond_df = df[df[self.CONDITION_COL] == condition]
             condition_data[condition] = cond_df[EARLY_LAYER_FRACTION_COL].dropna().values
 
         # Calculate descriptive stats per condition
@@ -97,6 +103,8 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
 
         # Pairwise comparisons between conditions
         conditions = list(condition_data.keys())
+        significance_rows = []
+
         for i, cond1 in enumerate(conditions):
             for cond2 in conditions[i+1:]:
                 vals1 = condition_data[cond1]
@@ -105,31 +113,42 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
                 if len(vals1) < 2 or len(vals2) < 2:
                     continue
 
+                row = {'metric': EARLY_LAYER_FRACTION_COL, 'comparison': f'{cond1} vs {cond2}'}
+
                 # Mann-Whitney U test (non-parametric)
                 try:
                     u_stat, u_pval = stats.mannwhitneyu(vals1, vals2, alternative='two-sided')
-                    results[f'{cond1}_vs_{cond2}_mannwhitney_u'] = float(u_stat)
+                    row['mw_p_value'] = float(u_pval)
+                    row['mw_significant'] = u_pval < SIGNIFICANCE_THRESHOLD
+                    # Rank-biserial correlation
+                    n1, n2 = len(vals1), len(vals2)
+                    row['rank_biserial_r'] = (2 * u_stat) / (n1 * n2) - 1
                     results[f'{cond1}_vs_{cond2}_mannwhitney_p'] = float(u_pval)
                 except Exception:
                     pass
 
                 # Independent t-test
                 try:
-                    t_stat, t_pval = stats.ttest_ind(vals1, vals2)
-                    results[f'{cond1}_vs_{cond2}_ttest_t'] = float(t_stat)
+                    t_stat, t_pval = stats.ttest_ind(vals1, vals2, equal_var=False)
+                    row['t_p_value'] = float(t_pval)
+                    row['t_significant'] = t_pval < SIGNIFICANCE_THRESHOLD
                     results[f'{cond1}_vs_{cond2}_ttest_p'] = float(t_pval)
                 except Exception:
                     pass
 
                 # Effect size (Cohen's d)
                 try:
-                    pooled_std = np.sqrt(((len(vals1)-1)*np.var(vals1) + (len(vals2)-1)*np.var(vals2)) /
-                                         (len(vals1) + len(vals2) - 2))
-                    if pooled_std > 0:
-                        cohens_d = (np.mean(vals1) - np.mean(vals2)) / pooled_std
-                        results[f'{cond1}_vs_{cond2}_cohens_d'] = float(cohens_d)
+                    sx, sy = np.std(vals1, ddof=1), np.std(vals2, ddof=1)
+                    denom = np.sqrt((sx ** 2 + sy ** 2) / 2)
+                    row['cohens_d'] = (np.mean(vals1) - np.mean(vals2)) / denom if denom > 0 else 0.0
+                    results[f'{cond1}_vs_{cond2}_cohens_d'] = row['cohens_d']
                 except Exception:
                     pass
+
+                significance_rows.append(row)
+
+        if significance_rows:
+            results['_significance_df'] = pd.DataFrame(significance_rows)
 
         return results
 
@@ -149,6 +168,7 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
         # Boxplot by condition
         plot_early_layer_boxplot(
             df, condition_order,
+            condition_col=self.CONDITION_COL,
             save_path=save_path / 'early_layer_boxplot.png' if save_path else None
         )
 
@@ -164,6 +184,7 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
         # Bar chart with means and error bars
         plot_early_layer_mean_comparison(
             df, condition_order, p_value=p_value,
+            condition_col=self.CONDITION_COL,
             save_path=save_path / 'early_layer_mean_comparison.png' if save_path else None
         )
 
@@ -171,5 +192,18 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
         if config_order:
             plot_early_layer_by_config(
                 df, condition_order, config_order,
+                condition_col=self.CONDITION_COL,
                 save_path=save_path / 'early_layer_by_config.png' if save_path else None
+            )
+
+        # Significance effect size visualization
+        sig_df = stats_results.get('_significance_df')
+        if sig_df is not None and save_path:
+            sig_df.to_csv(save_path / EARLY_LAYER_SIGNIFICANCE_FILENAME, index=False)
+            plot_significance_effect_sizes(
+                sig_df,
+                title='Early Layer Contribution',
+                save_path=save_path / 'early_layer_effect_sizes.png',
+                t_sig_col='t_significant',
+                mw_sig_col='mw_significant'
             )
