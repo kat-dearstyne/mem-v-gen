@@ -687,11 +687,12 @@ class GraphAnalyzer:
 
         links = graph.get_links_from_node(
             starting_node=starting_node,
-            include_features_only=True
+            include_features_only=True,
         )
 
         total_weight = 0.0
         early_layer_weight = 0.0
+        later_layer_weight = 0.0
 
         for link in links:
             weight = link['weight']
@@ -700,5 +701,9 @@ class GraphAnalyzer:
             source_node = node_dict.get(link['source'])
             if source_node and float(source_node.get('layer', 'inf')) <= max_layer:
                 early_layer_weight += weight
+            else:
+                later_layer_weight += weight
+
+        assert total_weight - (later_layer_weight + early_layer_weight) < 1e-5
 
         return early_layer_weight / total_weight if total_weight > 0 else 0.0

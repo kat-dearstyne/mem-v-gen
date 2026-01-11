@@ -150,7 +150,8 @@ class CrossConfigSubgraphFilterStep(CrossConfigAnalyzeStep):
             config_name: Name of the config being processed.
         """
         for prompt, metrics_dict in step_data.items():
-            if prompt == SHARED_FEATURES_KEY:
+            # Skip non-prompt keys (shared_features key and FeatureSharingMetrics enum keys)
+            if not isinstance(prompt, str) or prompt == SHARED_FEATURES_KEY:
                 continue
 
             results[CONFIG_NAME_COL].append(config_name)

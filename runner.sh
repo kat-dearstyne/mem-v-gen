@@ -16,4 +16,4 @@ python3.12 -m pip install -r requirement.txt
 
 export PATH=${HOME}/.local/bin:${PATH}
 
-python test_error_hypothesis.py
+python main.py

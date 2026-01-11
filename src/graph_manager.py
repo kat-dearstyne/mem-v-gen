@@ -24,6 +24,7 @@ class GraphManager:
         self.prompt = self.metadata["prompt"]
         self.url = self.metadata["info"]["url"]
         self.node_dict = self.get_node_dict()
+        self.__output_node = None
 
     def create_node_df(self, include_errors_by_pos: bool = False,
                        exclude_embeddings: bool = False, exclude_errors: bool = False,
@@ -142,17 +143,22 @@ class GraphManager:
                 target_id_to_links[target_id] = []
             if not positive_only or link["weight"] > 0:
                 target_id_to_links[target_id].append(link)
+
         relevant_links = []
-        seen = set()
-        new_targets = self.get_links_to_targets([starting_node_id], target_id_to_links, relevant_links, allowed_nodes)
+        visited_targets = set()
+
+        new_sources = self._collect_links_to_targets(
+            {starting_node_id}, target_id_to_links, relevant_links, allowed_nodes, visited_targets
+        )
+
         n_hops = 0
-        while new_targets:
+        while new_sources:
             n_hops += 1
             if hops and n_hops >= hops:
                 break
-            seen.update(new_targets)
-            new_targets = self.get_links_to_targets(new_targets, target_id_to_links, relevant_links, allowed_nodes)
-            new_targets = new_targets.difference(seen)
+            new_sources = self._collect_links_to_targets(
+                new_sources, target_id_to_links, relevant_links, allowed_nodes, visited_targets
+            )
 
         return relevant_links
 
@@ -223,7 +229,18 @@ class GraphManager:
         Returns:
             The node dict for the target output logit.
         """
-        return [node for node in self.nodes if node['is_target_logit']][0]
+        if not self.__output_node:
+            self.__output_node = [node for node in self.nodes if node['is_target_logit']][0]
+        return self.__output_node
+
+    def get_last_layers(self) -> int:
+        """
+        Get the number of the last layer based on output logits.
+
+        Returns:
+            The number of the last layer.
+        """
+        return int(self.get_top_output_logit_node()['layer'])
 
     def get_output_logits(self) -> List[Dict[str, Any]]:
         """
@@ -343,22 +360,32 @@ class GraphManager:
         return node_name
 
     @staticmethod
-    def get_links_to_targets(target_ids: Union[List[str], Set[str]], target_id_to_links: Dict[str, List[Dict]],
-                             links: List[Dict], allowed_nodes: Set[str]) -> Set[str]:
+    def _collect_links_to_targets(target_ids: Set[str], target_id_to_links: Dict[str, List[Dict]],
+                                  links: List[Dict], allowed_nodes: Set[str],
+                                  visited_targets: Set[str]) -> Set[str]:
         """
-        Get links to specified target ids and collect new source targets.
+        Collect links to specified targets and return their sources.
+
+        Only processes targets not yet visited. Adds found links to the links list
+        and returns the set of new source node ids.
 
         Args:
             target_ids: Set of target node ids to find links for.
             target_id_to_links: Mapping of target ids to their links.
             links: List to append found links to.
             allowed_nodes: Set of allowed source node ids.
+            visited_targets: Set of already-visited target ids (modified in place).
 
         Returns:
-            Set of new source node ids found.
+            Set of new source node ids (excluding already visited targets).
         """
+        new_sources = set()
         for target_id in target_ids:
-            linked = target_id_to_links.get(target_id, [])
-            links.extend([link for link in linked if link["source"] in allowed_nodes])
-        new_targets = {link["source"] for link in links}
-        return new_targets
+            if target_id in visited_targets:
+                continue
+            visited_targets.add(target_id)
+            for link in target_id_to_links.get(target_id, []):
+                if link["source"] in allowed_nodes:
+                    links.append(link)
+                    new_sources.add(link["source"])
+        return new_sources - visited_targets

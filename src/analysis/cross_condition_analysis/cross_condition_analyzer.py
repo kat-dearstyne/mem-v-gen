@@ -7,6 +7,7 @@ from src.analysis.cross_condition_analysis.cross_condition_analyze_step import C
 from src.analysis.cross_condition_analysis.cross_condition_early_layer_step import (
     CrossConditionEarlyLayerStep
 )
+from src.analysis.cross_condition_analysis.cross_condition_l0_step import CrossConditionL0Step
 from src.analysis.cross_condition_analysis.cross_condition_overlap_visualization_step import (
     CrossConditionOverlapVisualizationStep
 )
@@ -21,6 +22,7 @@ from src.analysis.cross_condition_analysis.cross_condition_shared_features_visua
 # Mapping of step names to step classes
 CROSS_CONDITION_STEPS: List[Type[CrossConditionAnalyzeStep]] = [
     CrossConditionEarlyLayerStep,
+    CrossConditionL0Step,
     CrossConditionOverlapVisualizationStep,
     CrossConditionFeatureOverlapVisualizationStep,
     CrossConditionSharedFeaturesVisualizationStep,

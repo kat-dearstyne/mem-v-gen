@@ -1,28 +1,20 @@
 import inspect
-import os
 from collections import namedtuple
 from copy import deepcopy
-from functools import partial
-from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 import numpy as np
 import torch
-import transformer_lens as tl
-from circuit_tracer import ReplacementModel
-from huggingface_hub import login
 from torch import Tensor
 
-from src.constants import IS_TEST, TOP_K
 from src.analysis.config_analysis.config_analyze_step import ConfigAnalyzeStep
-from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
-from src.graph_manager import GraphManager
+from src.constants import IS_TEST, TOP_K
 from src.metrics import ReplacementAccuracyMetrics
-from src.utils import save_json
+from src.replacement_model import ReplacementModelManager
+from src.utils import get_method_kwargs
 
 if TYPE_CHECKING:
     from src.graph_analyzer import GraphAnalyzer
-
 
 ReplacementPredComparison = namedtuple("ReplacementPredComparison", [
     "prompt_tokens", "base_logits_BPV", "replacement_logits_BPV", "original_top_token_id"
@@ -43,8 +35,6 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
                                 ReplacementAccuracyMetrics.TOP_K_AGREEMENT,
                                 ReplacementAccuracyMetrics.REPLACEMENT_PROB_OF_ORIGINAL_TOP}
     LOWER_IS_BETTER_METRICS = {ReplacementAccuracyMetrics.KL_DIVERGENCE}
-    BASE_MODEL = "google/gemma-2-2b"
-    SUB_MODEL = "mntss/clt-gemma-2-2b-426k"
 
     def __init__(self,
                  graph_analyzer: "GraphAnalyzer",
@@ -61,7 +51,9 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
         """
         self.metrics2run = {e for e in ReplacementAccuracyMetrics} if not metrics2run else metrics2run
         self.memorized_completion = memorized_completion
-        self.model = None
+
+        self.model_manager = ReplacementModelManager(**get_method_kwargs(
+            ReplacementModelManager.__init__, kwargs))
         self.metric2func = {
             ReplacementAccuracyMetrics.PER_POSITION_COSINE: self.get_per_position_cosine,
             ReplacementAccuracyMetrics.PER_POSITION_KL: self.get_per_position_kl_divergence,
@@ -81,9 +73,6 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
         Returns:
             Dictionary mapping prompt IDs to their metric results.
         """
-        print("Loading model...")
-        model = self.load_model()
-        print("Model loaded.\n")
 
         results = {}
         for prompt_id, graph in self.graph_analyzer.graphs.items():
@@ -91,38 +80,6 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
             results[prompt_id] = metrics
 
         return results
-
-    def get_model(self) -> ReplacementModel | None:
-        """
-        Get the model instance, loading it if necessary.
-
-        Returns:
-            The ReplacementModel instance, or None in test mode.
-        """
-        if self.model is None:
-            self.model = self.load_model()
-        return self.model
-
-    def load_model(self) -> ReplacementModel | None:
-        """
-        Load the ReplacementModel with CLT transcoders.
-
-        Returns:
-            The loaded ReplacementModel, or None in test mode.
-        """
-        hf_token = os.environ.get("HF_TOKEN")
-
-        if IS_TEST:
-            return None
-
-        if hf_token:
-            login(hf_token)
-        model = ReplacementModel.from_pretrained(
-            self.BASE_MODEL,
-            self.SUB_MODEL,
-            dtype=torch.bfloat16,
-        )
-        return model
 
     def run_accuracy_test(self, prompt_str: str) -> dict[str, Any]:
         """
@@ -163,31 +120,6 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
         }
         return results
 
-    @staticmethod
-    def save_results(results: dict, output_dir: Path) -> None:
-        """
-        Save results to JSON file.
-
-        Args:
-            results: Dictionary structured as {config_name: {SupportedConfigAnalyzeStep: {condition: metrics}}}.
-            output_dir: Directory to save the output file.
-        """
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / "error_hypothesis_analysis.json"
-
-        # Convert namedtuples to dicts for JSON serialization
-        serializable_results = {}
-        for config_name, config_results in results.items():
-            condition_metrics = config_results[SupportedConfigAnalyzeStep.REPLACEMENT_MODEL]
-            serializable_results[config_name] = {
-                condition: metrics
-                for condition, metrics in condition_metrics.items()
-            }
-
-        save_json(serializable_results, output_path)
-
-        print(f"\nResults saved to: {output_path}")
-
     def _get_model_outputs(self, prompt_str: str,
                            results: dict[ReplacementAccuracyMetrics, Any]
                            ) -> tuple[Tensor, ModelOutput, ModelOutput]:
@@ -201,12 +133,12 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
         Returns:
             Tuple of (prompt_tokens, base_output, replacement_output).
         """
-        model = self.get_model()
+        model = self.model_manager.get_model()
         prompt_tokens = model.ensure_tokenized(prompt_str)
 
         with torch.no_grad():
             base_logits_BPV = model(prompt_tokens, return_type='logits')
-            replacement_logits_BPV = self.get_replacement_logits(prompt_tokens)
+            replacement_logits_BPV = self.model_manager.get_replacement_logits(prompt_tokens)
 
         base_output = self._extract_model_output(base_logits_BPV)
         replacement_output = self._extract_model_output(replacement_logits_BPV)
@@ -247,51 +179,6 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
         if ReplacementAccuracyMetrics.PER_POSITION_CROSS_ENTROPY in self.metrics2run:
             results[ReplacementAccuracyMetrics.PERPLEXITY_FULL] = None
         return prompt_tokens, base_output, replacement_output
-
-    def get_replacement_logits(self, prompt_tokens: Tensor) -> Tensor:
-        """
-        Get logits using transcoder-reconstructed MLP activations.
-
-        Hooks into each layer to encode activations through transcoders,
-        then decode them back, replacing the original MLP outputs.
-
-        Args:
-            prompt_tokens: Tokenized prompt tensor.
-
-        Returns:
-            Logits tensor from the replacement model.
-        """
-        model = self.get_model()
-        features = torch.zeros(
-            (model.cfg.n_layers, len(prompt_tokens), model.transcoders.d_transcoder),
-            dtype=torch.bfloat16
-        ).to(model.cfg.device)
-        bos_actv = torch.zeros((model.cfg.d_model), dtype=torch.bfloat16).to(model.cfg.device)
-
-        def input_hook_fn(value, hook, layer):
-            nonlocal bos_actv
-            bos_actv = value[0, 0]
-            features[layer] = model.transcoders.encode_layer(value, layer)
-            features[:, 0] = 0.  # exclude bos
-            return value
-
-        def output_hook_fn(value, hook, layer):
-            mlp_outs = model.transcoders.decode(features)
-            mlp_out = mlp_outs[layer].unsqueeze(0)
-            mlp_out[:, 0] = bos_actv
-            return mlp_out
-
-        all_hooks = []
-        for layer in range(model.cfg.n_layers):
-            input_hook_fn_partial = partial(input_hook_fn, layer=layer)
-            all_hooks.append((tl.utils.get_act_name(model.feature_input_hook[5:], layer), input_hook_fn_partial))
-
-            output_hook_fn_partial = partial(output_hook_fn, layer=layer)
-            all_hooks.append((tl.utils.get_act_name(model.feature_output_hook[5:], layer), output_hook_fn_partial))
-
-        with torch.no_grad():
-            logits = model.run_with_hooks(prompt_tokens, fwd_hooks=all_hooks, return_type='logits')
-        return logits
 
     def get_base_perplexity(self, base_logits_BPV: Tensor,
                             prompt_tokens: Tensor) -> tuple[float | None, float | None]:

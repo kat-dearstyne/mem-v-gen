@@ -9,6 +9,7 @@ from matplotlib import pyplot as plt
 from narwhals import DataFrame
 
 from src.constants import FEATURE_LAYER, FEATURE_ID, CUSTOM_PALETTE, COLORS
+from src.metrics import ComparisonMetrics, SharedFeatureMetrics, ReplacementAccuracyMetrics
 from src.utils import get_conditions_from_label
 
 # Set up plot styling
@@ -86,26 +87,31 @@ def plot_metric_by_condition(df: pd.DataFrame,
                              ylabel: str,
                              save_path: Optional[Path] = None,
                              condition_order: Optional[List[str]] = None,
-                             config_order: Optional[List[str]] = None) -> None:
+                             config_order: Optional[List[str]] = None,
+                             condition_col: str = 'condition',
+                             config_col: str = 'config_name') -> None:
     """
     Creates a grouped bar chart comparing a metric across conditions for each config.
 
     Args:
-        df: DataFrame with config_name, prompt_type, and metric columns.
+        df: DataFrame with config and condition columns plus metric column.
         metric_col: Column name for the metric to plot.
         title: Plot title.
         ylabel: Y-axis label.
         save_path: Optional path to save the figure.
         condition_order: Optional ordering for conditions.
         config_order: Optional ordering for configs.
+        condition_col: Column name for conditions.
+        config_col: Column name for configs.
     """
     if condition_order is None:
-        condition_order = df['prompt_type'].unique().tolist()
+        condition_order = df[condition_col].unique().tolist()
     if config_order is None:
-        config_order = df['config_name'].unique().tolist()
+        config_order = df[config_col].unique().tolist()
 
-    # Pivot for easier plotting
-    pivot_df = df.pivot(index='config_name', columns='prompt_type', values=metric_col)
+    # Pivot with aggregation to handle duplicate entries
+    pivot_df = df.pivot_table(index=config_col, columns=condition_col,
+                               values=metric_col, aggfunc='mean')
     pivot_df = pivot_df.reindex(config_order)
     pivot_df = pivot_df[condition_order]
 
@@ -166,25 +172,30 @@ def plot_metric_heatmap(df: pd.DataFrame,
                         cbar_label: str,
                         save_path: Optional[Path] = None,
                         condition_order: Optional[List[str]] = None,
-                        config_order: Optional[List[str]] = None) -> None:
+                        config_order: Optional[List[str]] = None,
+                        condition_col: str = 'condition',
+                        config_col: str = 'config_name') -> None:
     """
     Creates a heatmap of metric values across configs and conditions.
 
     Args:
-        df: DataFrame with config_name, prompt_type, and metric columns.
+        df: DataFrame with config and condition columns plus metric column.
         metric_col: Column name for the metric to plot.
         title: Plot title.
         cbar_label: Colorbar label.
         save_path: Optional path to save the figure.
         condition_order: Optional ordering for conditions.
         config_order: Optional ordering for configs.
+        condition_col: Column name for conditions.
+        config_col: Column name for configs.
     """
     if condition_order is None:
-        condition_order = df['prompt_type'].unique().tolist()
+        condition_order = df[condition_col].unique().tolist()
     if config_order is None:
-        config_order = df['config_name'].unique().tolist()
+        config_order = df[config_col].unique().tolist()
 
-    pivot_df = df.pivot(index='config_name', columns='prompt_type', values=metric_col)
+    pivot_df = df.pivot_table(index=config_col, columns=condition_col,
+                               values=metric_col, aggfunc='mean')
     pivot_df = pivot_df.reindex(config_order)
     pivot_df = pivot_df[condition_order]
 
@@ -235,29 +246,31 @@ def plot_metric_boxplot(df: pd.DataFrame,
                         title: str,
                         ylabel: str,
                         save_path: Optional[Path] = None,
-                        condition_order: Optional[List[str]] = None) -> None:
+                        condition_order: Optional[List[str]] = None,
+                        condition_col: str = 'condition') -> None:
     """
     Creates a boxplot comparing metric distributions across conditions.
 
     Args:
-        df: DataFrame with prompt_type and metric columns.
+        df: DataFrame with condition and metric columns.
         metric_col: Column name for the metric to plot.
         title: Plot title.
         ylabel: Y-axis label.
         save_path: Optional path to save the figure.
         condition_order: Optional ordering for conditions.
+        condition_col: Column name for conditions.
     """
     if condition_order is None:
-        condition_order = df['prompt_type'].unique().tolist()
+        condition_order = df[condition_col].unique().tolist()
 
     fig, ax = plt.subplots(figsize=(8, 5))
 
     palette = get_palette(len(condition_order))
 
-    sns.boxplot(x='prompt_type', y=metric_col, data=df, hue='prompt_type',
+    sns.boxplot(x=condition_col, y=metric_col, data=df, hue=condition_col,
                 order=condition_order, hue_order=condition_order, palette=palette,
                 width=0.5, linewidth=1.5, fliersize=0, legend=False, ax=ax)
-    sns.stripplot(x='prompt_type', y=metric_col, data=df,
+    sns.stripplot(x=condition_col, y=metric_col, data=df,
                   order=condition_order, color='#333333', alpha=0.6,
                   size=6, jitter=0.15, ax=ax)
 
@@ -301,34 +314,40 @@ def plot_metric_line(df: pd.DataFrame,
                      save_path: Optional[Path] = None,
                      condition_order: Optional[List[str]] = None,
                      config_order: Optional[List[str]] = None,
+                     condition_col: str = 'condition',
+                     config_col: str = 'config_name',
                      extra_series: Optional[dict] = None) -> None:
     """
     Creates a line plot showing metric trends across configs for each condition.
 
     Args:
-        df: DataFrame with config_name, prompt_type, and metric columns.
+        df: DataFrame with config and condition columns plus metric column.
         metric_col: Column name for the metric to plot.
         title: Plot title.
         ylabel: Y-axis label.
         save_path: Optional path to save the figure.
         condition_order: Optional ordering for conditions.
         config_order: Optional ordering for configs.
+        condition_col: Column name for conditions.
+        config_col: Column name for configs.
         extra_series: Optional dict with 'label' and 'data' keys for additional line.
     """
     if condition_order is None:
-        condition_order = df['prompt_type'].unique().tolist()
+        condition_order = df[condition_col].unique().tolist()
     if config_order is None:
-        config_order = df['config_name'].unique().tolist()
+        config_order = df[config_col].unique().tolist()
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
     palette = get_palette(len(condition_order))
 
     for i, condition in enumerate(condition_order):
-        cond_df = df[df[condition_col] == condition].set_index('config_name')
-        cond_df = cond_df.reindex(config_order)
+        cond_df = df[df[condition_col] == condition]
+        # Aggregate by config, averaging across prompt types
+        cond_means = cond_df.groupby(config_col)[metric_col].mean()
+        cond_means = cond_means.reindex(config_order)
 
-        ax.plot(config_order, cond_df[metric_col],
+        ax.plot(config_order, cond_means,
                 marker='o', markersize=8, linewidth=2,
                 color=palette[i], label=condition)
 
@@ -377,33 +396,35 @@ def plot_metric_vs_probability_scatter(df: pd.DataFrame,
                                        title: str,
                                        xlabel: str,
                                        save_path: Optional[Path] = None,
-                                       condition_order: Optional[List[str]] = None) -> None:
+                                       condition_order: Optional[List[str]] = None,
+                                       condition_col: str = 'condition') -> None:
     """
     Creates a scatter plot showing relationship between a metric and output probability.
     Points are colored by condition with regression lines for each.
     """
     if condition_order is None:
-        condition_order = df['prompt_type'].unique().tolist()
+        condition_order = df[condition_col].unique().tolist()
 
     fig, ax = plt.subplots(figsize=(9, 6))
 
     palette = get_palette(len(condition_order))
+    prob_col = ComparisonMetrics.OUTPUT_PROBABILITY.value
 
     for i, condition in enumerate(condition_order):
-        cond_df = df[df['prompt_type'] == condition]
-        ax.scatter(cond_df[metric_col], cond_df['output_probability'],
+        cond_df = df[df[condition_col] == condition]
+        ax.scatter(cond_df[metric_col], cond_df[prob_col],
                    color=palette[i], label=condition, alpha=0.7, s=60, edgecolor='white')
 
         # Add regression line
         if len(cond_df) > 1:
-            z = np.polyfit(cond_df[metric_col], cond_df['output_probability'], 1)
+            z = np.polyfit(cond_df[metric_col], cond_df[prob_col], 1)
             p = np.poly1d(z)
             x_line = np.linspace(cond_df[metric_col].min(), cond_df[metric_col].max(), 100)
             ax.plot(x_line, p(x_line), color=palette[i], linestyle='--', alpha=0.7, linewidth=1.5)
 
     ax.set_title(title, pad=15)
     ax.set_xlabel(xlabel, labelpad=10)
-    ax.set_ylabel('Output Probability', labelpad=10)
+    ax.set_ylabel(ComparisonMetrics.OUTPUT_PROBABILITY.get_printable(), labelpad=10)
     ax.legend(title='Condition', frameon=True, fancybox=True, shadow=True)
 
     sns.despine(left=True, bottom=True)
@@ -419,32 +440,36 @@ def plot_metric_vs_probability_scatter(df: pd.DataFrame,
 def plot_metric_vs_probability_combined(df: pd.DataFrame,
                                         title: str = "Jaccard Metrics vs Output Probability",
                                         save_path: Optional[Path] = None,
-                                        condition_order: Optional[List[str]] = None) -> None:
+                                        condition_order: Optional[List[str]] = None,
+                                        condition_col: str = 'condition') -> None:
     """
     Creates a 2x1 subplot showing both Jaccard and Weighted Jaccard vs output probability.
     """
     if condition_order is None:
-        condition_order = df['prompt_type'].unique().tolist()
+        condition_order = df[condition_col].unique().tolist()
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
     palette = get_palette(len(condition_order))
 
-    for ax, metric_col, xlabel in zip(axes, ['jaccard_index', 'relative_jaccard'],
-                                      ['Jaccard Index', 'Weighted Jaccard']):
+    metrics = [ComparisonMetrics.JACCARD_INDEX, ComparisonMetrics.WEIGHTED_JACCARD]
+    for ax, metric in zip(axes, metrics):
+        metric_col = metric.value
+        xlabel = metric.get_printable()
         for i, condition in enumerate(condition_order):
-            cond_df = df[df['prompt_type'] == condition]
-            ax.scatter(cond_df[metric_col], cond_df['output_probability'],
+            cond_df = df[df[condition_col] == condition]
+            ax.scatter(cond_df[metric_col], cond_df[ComparisonMetrics.OUTPUT_PROBABILITY.value],
                        color=palette[i], label=condition, alpha=0.7, s=60, edgecolor='white')
 
+            prob_col = ComparisonMetrics.OUTPUT_PROBABILITY.value
             if len(cond_df) > 1:
-                z = np.polyfit(cond_df[metric_col], cond_df['output_probability'], 1)
+                z = np.polyfit(cond_df[metric_col], cond_df[prob_col], 1)
                 p = np.poly1d(z)
                 x_line = np.linspace(cond_df[metric_col].min(), cond_df[metric_col].max(), 100)
                 ax.plot(x_line, p(x_line), color=palette[i], linestyle='--', alpha=0.7, linewidth=1.5)
 
         ax.set_xlabel(xlabel, labelpad=10)
-        ax.set_ylabel('Output Probability', labelpad=10)
+        ax.set_ylabel(ComparisonMetrics.OUTPUT_PROBABILITY.get_printable(), labelpad=10)
         sns.despine(ax=ax, left=True, bottom=True)
 
     axes[0].legend(title='Condition', frameon=True, fancybox=True, shadow=True)
@@ -473,15 +498,18 @@ def plot_probability_by_condition(df: pd.DataFrame,
 def plot_correlation_heatmap(df: pd.DataFrame,
                              title: str = "Metric Correlations by Condition",
                              save_path: Optional[Path] = None,
-                             condition_order: Optional[List[str]] = None) -> None:
+                             condition_order: Optional[List[str]] = None,
+                             condition_col: str = 'condition') -> None:
     """
     Creates a heatmap showing correlations between metrics for each condition.
     """
     if condition_order is None:
-        condition_order = df['prompt_type'].unique().tolist()
+        condition_order = df[condition_col].unique().tolist()
 
-    metrics = ['jaccard_index', 'relative_jaccard', 'output_probability']
-    metric_labels = ['Jaccard', 'Weighted Jaccard', 'Output Prob']
+    metric_enums = [ComparisonMetrics.JACCARD_INDEX, ComparisonMetrics.WEIGHTED_JACCARD,
+                    ComparisonMetrics.OUTPUT_PROBABILITY]
+    metric_cols = [m.value for m in metric_enums]
+    metric_labels = [m.get_printable() for m in metric_enums]
 
     n_conditions = len(condition_order)
     fig, axes = plt.subplots(1, n_conditions, figsize=(5 * n_conditions, 4))
@@ -490,7 +518,7 @@ def plot_correlation_heatmap(df: pd.DataFrame,
         axes = [axes]
 
     for ax, condition in zip(axes, condition_order):
-        cond_df = df[df['prompt_type'] == condition][metrics]
+        cond_df = df[df[condition_col] == condition][metric_cols]
         corr = cond_df.corr()
 
         sns.heatmap(corr, annot=True, fmt='.2f', cmap='RdBu_r', center=0,
@@ -515,21 +543,21 @@ def plot_combined_metrics(df: pd.DataFrame,
                           save_dir: Optional[Path] = None,
                           condition_order: Optional[List[str]] = None,
                           config_order: Optional[List[str]] = None,
-                          condition_col: str = 'prompt_type') -> None:
+                          condition_col: str = 'condition') -> None:
     """
     Creates all visualizations for combined overlap metrics (unique/shared fractions).
     """
     if condition_order is None:
         condition_order = sorted(df[condition_col].unique().tolist())
     if config_order is None:
-        config_order = sorted(df['config_name'].unique().tolist())
+        config_order = sorted(df[config_col].unique().tolist())
 
     palette = get_palette(len(condition_order))
 
     # Line plot for unique_frac by condition
     fig, ax = plt.subplots(figsize=(10, 6))
     for i, condition in enumerate(condition_order):
-        cond_df = df[df[condition_col] == condition].set_index('config_name')
+        cond_df = df[df[condition_col] == condition].set_index(config_col)
         cond_df = cond_df.reindex(config_order)
         ax.plot(config_order, cond_df['unique_frac'],
                 marker='o', markersize=8, linewidth=2,
@@ -554,7 +582,7 @@ def plot_combined_metrics(df: pd.DataFrame,
     # Line plot for shared_frac by condition
     fig, ax = plt.subplots(figsize=(10, 6))
     for i, condition in enumerate(condition_order):
-        cond_df = df[df[condition_col] == condition].set_index('config_name')
+        cond_df = df[df[condition_col] == condition].set_index(config_col)
         cond_df = cond_df.reindex(config_order)
         ax.plot(config_order, cond_df['shared_frac'],
                 marker='o', markersize=8, linewidth=2,
@@ -581,7 +609,7 @@ def plot_combined_metrics(df: pd.DataFrame,
 
     ax = axes[0]
     for i, condition in enumerate(condition_order):
-        cond_df = df[df[condition_col] == condition].set_index('config_name')
+        cond_df = df[df[condition_col] == condition].set_index(config_col)
         cond_df = cond_df.reindex(config_order)
         ax.plot(config_order, cond_df['unique_weighted_frac'],
                 marker='o', markersize=8, linewidth=2,
@@ -597,7 +625,7 @@ def plot_combined_metrics(df: pd.DataFrame,
 
     ax = axes[1]
     for i, condition in enumerate(condition_order):
-        cond_df = df[df[condition_col] == condition].set_index('config_name')
+        cond_df = df[df[condition_col] == condition].set_index(config_col)
         cond_df = cond_df.reindex(config_order)
         ax.plot(config_order, cond_df['shared_weighted_frac'],
                 marker='o', markersize=8, linewidth=2,
@@ -631,7 +659,7 @@ def plot_combined_metrics(df: pd.DataFrame,
 def plot_combined_boxplot(df: pd.DataFrame,
                            save_path: Optional[Path] = None,
                            condition_order: Optional[List[str]] = None,
-                           condition_col: str = 'prompt_type') -> None:
+                           condition_col: str = 'condition') -> None:
     """
     Creates boxplots comparing unique/shared fractions across conditions.
     """
@@ -675,20 +703,25 @@ def plot_combined_bar(df: pd.DataFrame,
                        save_path: Optional[Path] = None,
                        condition_order: Optional[List[str]] = None,
                        config_order: Optional[List[str]] = None,
-                       condition_col: str = 'prompt_type') -> None:
+                       condition_col: str = 'condition',
+                       config_col: str = 'config_name') -> None:
     """
     Creates grouped bar charts comparing unique/shared fractions across conditions for each config.
     """
+    from src.metrics import FeatureSharingMetrics
+    unique_frac_col = FeatureSharingMetrics.UNIQUE_FRAC.value
+    shared_frac_col = FeatureSharingMetrics.SHARED_FRAC.value
+
     if condition_order is None:
         condition_order = sorted(df[condition_col].unique().tolist())
     if config_order is None:
-        config_order = sorted(df['config_name'].unique().tolist())
+        config_order = sorted(df[config_col].unique().tolist())
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
     # Unique fraction bar chart
     ax = axes[0]
-    pivot_df = df.pivot(index='config_name', columns=condition_col, values='unique_frac')
+    pivot_df = df.pivot_table(index=config_col, columns=condition_col, values=unique_frac_col, aggfunc='mean')
     pivot_df = pivot_df.reindex(config_order)[condition_order]
     x = np.arange(len(config_order))
     width = 0.8 / len(condition_order)
@@ -708,7 +741,7 @@ def plot_combined_bar(df: pd.DataFrame,
 
     # Shared fraction bar chart
     ax = axes[1]
-    pivot_df = df.pivot(index='config_name', columns=condition_col, values='shared_frac')
+    pivot_df = df.pivot_table(index=config_col, columns=condition_col, values=shared_frac_col, aggfunc='mean')
     pivot_df = pivot_df.reindex(config_order)[condition_order]
     for i, condition in enumerate(condition_order):
         offset = (i - len(condition_order)/2 + 0.5) * width
@@ -736,20 +769,25 @@ def plot_combined_heatmap(df: pd.DataFrame,
                            save_path: Optional[Path] = None,
                            condition_order: Optional[List[str]] = None,
                            config_order: Optional[List[str]] = None,
-                           condition_col: str = 'prompt_type') -> None:
+                           condition_col: str = 'condition',
+                           config_col: str = 'config_name') -> None:
     """
     Creates heatmaps for unique/shared fractions by config and condition.
     """
+    from src.metrics import FeatureSharingMetrics
+    unique_frac_col = FeatureSharingMetrics.UNIQUE_FRAC.value
+    shared_frac_col = FeatureSharingMetrics.SHARED_FRAC.value
+
     if condition_order is None:
         condition_order = sorted(df[condition_col].unique().tolist())
     if config_order is None:
-        config_order = sorted(df['config_name'].unique().tolist())
+        config_order = sorted(df[config_col].unique().tolist())
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
     # Unique fraction heatmap
     ax = axes[0]
-    pivot_df = df.pivot(index='config_name', columns=condition_col, values='unique_frac')
+    pivot_df = df.pivot_table(index=config_col, columns=condition_col, values=unique_frac_col, aggfunc='mean')
     pivot_df = pivot_df.reindex(config_order)[condition_order]
     sns.heatmap(pivot_df, annot=True, fmt='.2f', cmap='YlOrRd',
                 vmin=0, vmax=1, ax=ax, cbar_kws={'label': 'Fraction'})
@@ -759,7 +797,7 @@ def plot_combined_heatmap(df: pd.DataFrame,
 
     # Shared fraction heatmap
     ax = axes[1]
-    pivot_df = df.pivot(index='config_name', columns=condition_col, values='shared_frac')
+    pivot_df = df.pivot_table(index=config_col, columns=condition_col, values=shared_frac_col, aggfunc='mean')
     pivot_df = pivot_df.reindex(config_order)[condition_order]
     sns.heatmap(pivot_df, annot=True, fmt='.2f', cmap='YlOrRd',
                 vmin=0, vmax=1, ax=ax, cbar_kws={'label': 'Fraction'})
@@ -780,7 +818,8 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
                                  save_dir: Optional[Path] = None,
                                  condition_order: Optional[List[str]] = None,
                                  config_order: Optional[List[str]] = None,
-                                 condition_col: str = 'prompt_type') -> None:
+                                 condition_col: str = 'condition',
+                                 config_col: str = 'config_name') -> None:
     """
     Creates visualizations for shared feature metrics across conditions.
     Includes threshold curve visualizations showing feature counts at different sharing thresholds.
@@ -788,11 +827,14 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
     if condition_order is None:
         condition_order = sorted(df[condition_col].unique().tolist())
     if config_order is None:
-        config_order = sorted(df['config_name'].unique().tolist())
+        config_order = sorted(df[config_col].unique().tolist())
+
+    # Discover threshold columns dynamically from DataFrame
+    threshold_pattern = SharedFeatureMetrics.COUNT_AT_THRESHOLD.value.replace('{}', '')
+    threshold_cols = sorted([c for c in df.columns if threshold_pattern in c])
+    thresholds = [int(c.replace('count_at_', '').replace('pct', '')) for c in threshold_cols]
 
     palette = get_palette(len(condition_order))
-    thresholds = [50, 75, 100]
-    threshold_cols = ['count_at_50pct', 'count_at_75pct', 'count_at_100pct']
     line_styles = ['-', '--', '-.', ':']
     markers = ['o', 's', '^', 'D', 'v', 'p']
 
@@ -832,7 +874,7 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
         axes = [axes]
     for ax, config in zip(axes, config_order):
         for i, condition in enumerate(condition_order):
-            cond_df = df[(df[condition_col] == condition) & (df['config_name'] == config)]
+            cond_df = df[(df[condition_col] == condition) & (df[config_col] == config)]
             if len(cond_df) > 0:
                 counts = [cond_df[col].values[0] for col in threshold_cols]
                 ax.plot(thresholds, counts, marker='o', markersize=6, linewidth=2,
@@ -860,12 +902,13 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
     x = np.arange(len(config_order))
     width = 0.8 / len(condition_order)
 
+    shared_present_col = SharedFeatureMetrics.SHARED_PRESENT_PER_PROMPT.value
     for i, condition in enumerate(condition_order):
-        cond_df = df[df[condition_col] == condition].set_index('config_name').reindex(config_order)
+        cond_df = df[df[condition_col] == condition].set_index(config_col).reindex(config_order)
         means, stds, mins, maxs = [], [], [], []
         for config in config_order:
             if config in cond_df.index:
-                counts = parse_counts(cond_df.loc[config, 'shared_present_per_prompt'])
+                counts = parse_counts(cond_df.loc[config, shared_present_col])
                 if counts:
                     means.append(np.mean(counts))
                     stds.append(np.std(counts))
@@ -908,21 +951,21 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
     # Boxplot: shared features present per prompt across conditions
     boxplot_data = []
     for _, row in df.iterrows():
-        counts = parse_counts(row['shared_present_per_prompt'])
+        counts = parse_counts(row[shared_present_col])
         for val in counts:
             boxplot_data.append({
-                'prompt_type': row['prompt_type'],
-                'config_name': row['config_name'],
+                condition_col: row[condition_col],
+                config_col: row[config_col],
                 'shared_present': val
             })
     boxplot_df = pd.DataFrame(boxplot_data)
 
     if not boxplot_df.empty:
         fig, ax = plt.subplots(figsize=(10, 6))
-        sns.boxplot(data=boxplot_df, x='prompt_type', y='shared_present', hue='prompt_type',
+        sns.boxplot(data=boxplot_df, x=condition_col, y='shared_present', hue=condition_col,
                     order=condition_order, hue_order=condition_order,
                     palette=palette, legend=False, ax=ax)
-        sns.stripplot(data=boxplot_df, x='prompt_type', y='shared_present', order=condition_order,
+        sns.stripplot(data=boxplot_df, x=condition_col, y='shared_present', order=condition_order,
                       color='#333333', alpha=0.4, size=4, jitter=0.2, ax=ax)
         ax.set_title('Shared Features Present per Prompt', pad=15)
         ax.set_xlabel('Condition', labelpad=10)
@@ -938,8 +981,8 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
 
         # Bar chart: mean shared features per prompt by condition with error bars
         fig, ax = plt.subplots(figsize=(8, 6))
-        condition_means = boxplot_df.groupby('prompt_type')['shared_present'].mean().reindex(condition_order)
-        condition_stds = boxplot_df.groupby('prompt_type')['shared_present'].std().reindex(condition_order)
+        condition_means = boxplot_df.groupby(condition_col)['shared_present'].mean().reindex(condition_order)
+        condition_stds = boxplot_df.groupby(condition_col)['shared_present'].std().reindex(condition_order)
 
         bars = ax.bar(range(len(condition_order)), condition_means.values,
                       color=[palette[i] for i in range(len(condition_order))], alpha=0.8)
@@ -961,9 +1004,11 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
             plt.show()
 
     # Bar chart: num_shared / avg_features_per_prompt by condition
-    df['shared_ratio'] = df['num_shared'] / df['avg_features_per_prompt']
-    ratio_means = df.groupby('prompt_type')['shared_ratio'].mean().reindex(condition_order)
-    ratio_stds = df.groupby('prompt_type')['shared_ratio'].std().reindex(condition_order)
+    num_shared_col = SharedFeatureMetrics.NUM_SHARED.value
+    avg_features_col = SharedFeatureMetrics.AVG_FEATURES_PER_PROMPT.value
+    df['shared_ratio'] = df[num_shared_col] / df[avg_features_col]
+    ratio_means = df.groupby(condition_col)['shared_ratio'].mean().reindex(condition_order)
+    ratio_stds = df.groupby(condition_col)['shared_ratio'].std().reindex(condition_order)
 
     fig, ax = plt.subplots(figsize=(8, 6))
     bars = ax.bar(range(len(condition_order)), ratio_means.values,
@@ -987,7 +1032,7 @@ def plot_shared_feature_metrics(df: pd.DataFrame,
 
     # Bar chart comparing num_shared (at 50% threshold) by condition
     fig, ax = plt.subplots(figsize=(10, 6))
-    pivot_df = df.pivot(index='config_name', columns='prompt_type', values='num_shared')
+    pivot_df = df.pivot_table(index=config_col, columns=condition_col, values=num_shared_col, aggfunc='mean')
     pivot_df = pivot_df.reindex(config_order)[condition_order]
     x = np.arange(len(config_order))
     width = 0.8 / len(condition_order)
@@ -1101,8 +1146,7 @@ def plot_error_hypothesis_heatmap(df: pd.DataFrame,
 def plot_error_hypothesis_combined_boxplot(df: pd.DataFrame,
                                             conditions: List[str],
                                             save_path: Path,
-                                            metrics: Optional[List[str]] = None,
-                                            titles: Optional[List[str]] = None) -> None:
+                                            metrics: Optional[List[ReplacementAccuracyMetrics]] = None) -> None:
     """
     Creates a single figure with boxplots for multiple metrics.
 
@@ -1110,32 +1154,52 @@ def plot_error_hypothesis_combined_boxplot(df: pd.DataFrame,
         df: DataFrame with columns: condition and metric columns
         conditions: List of condition names
         save_path: Path to save the figure
-        metrics: List of metric column names (default: 4 main metrics)
-        titles: List of titles for each subplot (default: formatted metric names)
+        metrics: List of ReplacementAccuracyMetrics to plot (default: 4 main metrics)
     """
     if metrics is None:
-        metrics = ["last_token_cosine", "cumulative_cosine", "original_accuracy", "kl_divergence"]
-    if titles is None:
-        titles = ["Last Token Cosine", "Cumulative Cosine", "Original Accuracy", "KL Divergence"]
+        metrics = [
+            ReplacementAccuracyMetrics.LAST_TOKEN_COSINE,
+            ReplacementAccuracyMetrics.CUMULATIVE_COSINE,
+            ReplacementAccuracyMetrics.ORIGINAL_ACCURACY,
+            ReplacementAccuracyMetrics.KL_DIVERGENCE,
+        ]
+
+    title_overrides = {
+        ReplacementAccuracyMetrics.KL_DIVERGENCE: "KL Divergence",
+    }
+
+    # Filter to metrics that exist in the DataFrame
+    available_metrics = [m for m in metrics if m.value in df.columns]
+    if not available_metrics:
+        return
 
     palette = get_palette(len(conditions))
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    axes = axes.flatten()
+    n_metrics = len(available_metrics)
+    ncols = min(2, n_metrics)
+    nrows = (n_metrics + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 5 * nrows))
+    axes = [axes] if n_metrics == 1 else axes.flatten()
 
-    for i, (metric, title) in enumerate(zip(metrics, titles)):
+    for i, metric in enumerate(available_metrics):
         ax = axes[i]
-        is_bounded = metric != "kl_divergence"
+        metric_col = metric.value
+        title = title_overrides.get(metric, metric.get_printable())
+        is_bounded = metric != ReplacementAccuracyMetrics.KL_DIVERGENCE
         ylabel = "Score" if is_bounded else "KL Divergence (nats)"
 
-        sns.boxplot(data=df, x="condition", y=metric, hue="condition",
+        sns.boxplot(data=df, x="condition", y=metric_col, hue="condition",
                     order=conditions, hue_order=conditions,
                     palette=palette, legend=False, ax=ax)
-        sns.stripplot(data=df, x="condition", y=metric, order=conditions,
+        sns.stripplot(data=df, x="condition", y=metric_col, order=conditions,
                       color='black', alpha=0.5, size=3, ax=ax)
         ax.set_title(title, fontweight='bold', fontsize=11)
         ax.set_xlabel("")
         ax.set_ylabel(ylabel, fontsize=9)
         ax.tick_params(axis='x', rotation=45, labelsize=9)
+
+    # Hide unused axes
+    for j in range(len(available_metrics), len(axes)):
+        axes[j].set_visible(False)
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
@@ -1156,11 +1220,20 @@ def plot_error_hypothesis_metrics(df: pd.DataFrame,
     conditions = df["condition"].unique().tolist()
     palette = get_palette(len(conditions))
 
-    # All metrics with their display titles
-    all_metrics = ["last_token_cosine", "cumulative_cosine", "original_accuracy",
-                   "top_k_agreement", "replacement_prob_of_original_top", "kl_divergence"]
-    all_titles = ["Last Token Cosine", "Cumulative Cosine", "Original Accuracy",
-                  f"Top-{top_k} Agreement", "Replacement P(Original Top)", "KL Divergence"]
+    # Metrics to visualize with custom title overrides for special cases
+    metrics_to_plot = [
+        ReplacementAccuracyMetrics.LAST_TOKEN_COSINE,
+        ReplacementAccuracyMetrics.CUMULATIVE_COSINE,
+        ReplacementAccuracyMetrics.ORIGINAL_ACCURACY,
+        ReplacementAccuracyMetrics.TOP_K_AGREEMENT,
+        ReplacementAccuracyMetrics.REPLACEMENT_PROB_OF_ORIGINAL_TOP,
+        ReplacementAccuracyMetrics.KL_DIVERGENCE,
+    ]
+    title_overrides = {
+        ReplacementAccuracyMetrics.TOP_K_AGREEMENT: f"Top-{top_k} Agreement",
+        ReplacementAccuracyMetrics.REPLACEMENT_PROB_OF_ORIGINAL_TOP: "Replacement P(Original Top)",
+        ReplacementAccuracyMetrics.KL_DIVERGENCE: "KL Divergence",
+    }
 
     # Create directories for each plot type
     bar_dir = output_dir / "bar_charts"
@@ -1171,30 +1244,34 @@ def plot_error_hypothesis_metrics(df: pd.DataFrame,
     heatmap_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate individual plots for each metric
-    for metric, title in zip(all_metrics, all_titles):
-        is_bounded = metric != "kl_divergence"
+    for metric in metrics_to_plot:
+        metric_col = metric.value
+        if metric_col not in df.columns:
+            continue
+        title = title_overrides.get(metric, metric.get_printable())
+        is_bounded = metric != ReplacementAccuracyMetrics.KL_DIVERGENCE
 
         plot_error_hypothesis_bar_chart(
-            df, metric, title, conditions, palette,
-            bar_dir / f"{metric}.png", is_bounded
+            df, metric_col, title, conditions, palette,
+            bar_dir / f"{metric_col}.png", is_bounded
         )
         plot_error_hypothesis_boxplot(
-            df, metric, title, conditions, palette,
-            boxplot_dir / f"{metric}.png", is_bounded
+            df, metric_col, title, conditions, palette,
+            boxplot_dir / f"{metric_col}.png", is_bounded
         )
         plot_error_hypothesis_heatmap(
-            df, metric, title, conditions,
-            heatmap_dir / f"{metric}.png", is_bounded
+            df, metric_col, title, conditions,
+            heatmap_dir / f"{metric_col}.png", is_bounded
         )
 
 
 METRIC_LABELS = {
-    "last_token_cosine": "Last Token Cosine",
-    "cumulative_cosine": "Cumulative Cosine",
-    "original_accuracy": "Original Accuracy",
-    "kl_divergence": "KL Divergence",
-    "top_k_agreement": "Top-10 Agreement",
-    "replacement_prob_of_original_top": "Repl. P(Original Top)",
+    ReplacementAccuracyMetrics.LAST_TOKEN_COSINE.value: "Last Token Cosine",
+    ReplacementAccuracyMetrics.CUMULATIVE_COSINE.value: "Cumulative Cosine",
+    ReplacementAccuracyMetrics.ORIGINAL_ACCURACY.value: "Original Accuracy",
+    ReplacementAccuracyMetrics.KL_DIVERGENCE.value: "KL Divergence",
+    ReplacementAccuracyMetrics.TOP_K_AGREEMENT.value: "Top-10 Agreement",
+    ReplacementAccuracyMetrics.REPLACEMENT_PROB_OF_ORIGINAL_TOP.value: "Repl. P(Original Top)",
 }
 
 SIG_COLORS = {
@@ -1601,7 +1678,7 @@ def plot_delta_distribution(delta_values: List[float], title: str, label: str,
 def plot_early_layer_boxplot(df: pd.DataFrame,
                               condition_order: List[str],
                               value_col: str = 'early_layer_fraction',
-                              condition_col: str = 'prompt_type',
+                              condition_col: str = 'condition',
                               save_path: Optional[Path] = None) -> None:
     """
     Creates boxplot comparing early layer contribution between conditions.
@@ -1640,7 +1717,7 @@ def plot_early_layer_mean_comparison(df: pd.DataFrame,
                                       condition_order: List[str],
                                       p_value: Optional[float] = None,
                                       value_col: str = 'early_layer_fraction',
-                                      condition_col: str = 'prompt_type',
+                                      condition_col: str = 'condition',
                                       save_path: Optional[Path] = None) -> None:
     """
     Creates bar chart with means and error bars for early layer contribution.
@@ -1693,7 +1770,7 @@ def plot_early_layer_by_config(df: pd.DataFrame,
                                 condition_order: List[str],
                                 config_order: List[str],
                                 value_col: str = 'early_layer_fraction',
-                                condition_col: str = 'prompt_type',
+                                condition_col: str = 'condition',
                                 config_col: str = 'config_name',
                                 save_path: Optional[Path] = None) -> None:
     """
@@ -1726,6 +1803,167 @@ def plot_early_layer_by_config(df: pd.DataFrame,
     ax.legend()
 
     plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def plot_early_layer_threshold_comparison(df: pd.DataFrame,
+                                           condition_order: List[str],
+                                           max_layers: List[int],
+                                           value_col: str = 'early_layer_fraction',
+                                           condition_col: str = 'condition',
+                                           max_layer_col: str = 'max_layer',
+                                           save_path: Optional[Path] = None) -> None:
+    """
+    Creates line plot showing early layer contribution across different max_layer thresholds.
+
+    Shows how early layer contribution changes for each condition as the threshold increases.
+
+    Args:
+        df: DataFrame with early layer fractions and max_layer column.
+        condition_order: Order of conditions for legend.
+        max_layers: List of max_layer values for x-axis.
+        value_col: Column name for the values.
+        condition_col: Column name for the condition.
+        max_layer_col: Column name for max layer threshold.
+        save_path: Optional path to save the figure.
+    """
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    for i, cond in enumerate(condition_order):
+        cond_df = df[df[condition_col] == cond]
+
+        # Calculate mean and std for each threshold
+        means = []
+        stds = []
+        for layer in max_layers:
+            layer_vals = cond_df[cond_df[max_layer_col] == layer][value_col].dropna()
+            means.append(layer_vals.mean() if len(layer_vals) > 0 else np.nan)
+            stds.append(layer_vals.std() if len(layer_vals) > 0 else np.nan)
+
+        means = np.array(means)
+        stds = np.array(stds)
+
+        color = CUSTOM_PALETTE[i % len(CUSTOM_PALETTE)]
+        ax.plot(max_layers, means, marker='o', label=cond, color=color, linewidth=2, markersize=8)
+        ax.fill_between(max_layers, means - stds, means + stds, color=color, alpha=0.2)
+
+    ax.set_xlabel('Max Layer Threshold')
+    ax.set_ylabel('Early Layer Contribution Fraction')
+    ax.set_title('Early Layer Contribution Across Thresholds by Condition')
+    ax.legend()
+    ax.set_xticks(max_layers)
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def plot_early_layer_by_prompt_type(df: pd.DataFrame,
+                                     condition_order: List[str],
+                                     prompt_type_order: List[str],
+                                     value_col: str = 'early_layer_fraction',
+                                     condition_col: str = 'condition',
+                                     prompt_type_col: str = 'prompt_type',
+                                     save_path: Optional[Path] = None) -> None:
+    """
+    Creates grouped bar chart comparing conditions across prompt types.
+
+    Args:
+        df: DataFrame with early layer fractions.
+        condition_order: Order of conditions for grouping.
+        prompt_type_order: Order of prompt types for x-axis.
+        value_col: Column name for the values.
+        condition_col: Column name for the condition.
+        prompt_type_col: Column name for the prompt type.
+        save_path: Optional path to save the figure.
+    """
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    x = np.arange(len(prompt_type_order))
+    width = 0.8 / len(condition_order)
+
+    for i, cond in enumerate(condition_order):
+        cond_df = df[df[condition_col] == cond]
+        means = []
+        stds = []
+        for pt in prompt_type_order:
+            pt_vals = cond_df[cond_df[prompt_type_col] == pt][value_col].dropna()
+            means.append(pt_vals.mean() if len(pt_vals) > 0 else np.nan)
+            stds.append(pt_vals.std() if len(pt_vals) > 0 else np.nan)
+
+        offset = (i - len(condition_order) / 2 + 0.5) * width
+        bars = ax.bar(x + offset, means, width, label=cond,
+                      color=CUSTOM_PALETTE[i % len(CUSTOM_PALETTE)], yerr=stds, capsize=3)
+
+    ax.set_xlabel('Prompt Type')
+    ax.set_ylabel('Early Layer Contribution Fraction')
+    ax.set_title('Early Layer Contribution by Prompt Type and Condition')
+    ax.set_xticks(x)
+    ax.set_xticklabels(prompt_type_order, rotation=45, ha='right')
+    ax.legend()
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def plot_early_layer_prompt_type_lines(df: pd.DataFrame,
+                                        condition_order: List[str],
+                                        prompt_type_order: List[str],
+                                        value_col: str = 'early_layer_fraction',
+                                        condition_col: str = 'condition',
+                                        prompt_type_col: str = 'prompt_type',
+                                        save_path: Optional[Path] = None) -> None:
+    """
+    Creates line plot comparing conditions across prompt types with error bands.
+
+    Args:
+        df: DataFrame with early layer fractions.
+        condition_order: Order of conditions for legend.
+        prompt_type_order: Order of prompt types for x-axis.
+        value_col: Column name for the values.
+        condition_col: Column name for the condition.
+        prompt_type_col: Column name for the prompt type.
+        save_path: Optional path to save the figure.
+    """
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    x = np.arange(len(prompt_type_order))
+
+    for i, cond in enumerate(condition_order):
+        cond_df = df[df[condition_col] == cond]
+        means = []
+        stds = []
+        for pt in prompt_type_order:
+            pt_vals = cond_df[cond_df[prompt_type_col] == pt][value_col].dropna()
+            means.append(pt_vals.mean() if len(pt_vals) > 0 else np.nan)
+            stds.append(pt_vals.std() if len(pt_vals) > 0 else np.nan)
+
+        means = np.array(means)
+        stds = np.array(stds)
+
+        color = CUSTOM_PALETTE[i % len(CUSTOM_PALETTE)]
+        ax.plot(x, means, marker='o', label=cond, color=color, linewidth=2, markersize=8)
+        ax.fill_between(x, means - stds, means + stds, color=color, alpha=0.2)
+
+    ax.set_xlabel('Prompt Type')
+    ax.set_ylabel('Early Layer Contribution Fraction')
+    ax.set_title('Early Layer Contribution by Prompt Type and Condition')
+    ax.set_xticks(x)
+    ax.set_xticklabels(prompt_type_order, rotation=45, ha='right')
+    ax.legend()
+
     plt.tight_layout()
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -1796,6 +2034,74 @@ def boxplot_metric_family(metric_dict: Dict[int, List[float]], title_prefix: str
     ax.tick_params(axis='x', rotation=45)
 
     sns.despine(left=True, bottom=True)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close()
+    else:
+        plt.show()
+
+
+def plot_l0_per_layer_by_condition(df: pd.DataFrame,
+                                    condition_order: List[str],
+                                    condition_col: str = "condition",
+                                    layer_col: str = "layer",
+                                    l0_col: str = "l0_value",
+                                    save_path: Optional[Path] = None) -> None:
+    """
+    Creates side-by-side bar charts showing mean L0 per layer for each condition.
+
+    Args:
+        df: DataFrame with layer, l0_value, and condition columns.
+        condition_order: Order of conditions for subplots.
+        condition_col: Column name for condition.
+        layer_col: Column name for layer.
+        l0_col: Column name for L0 values.
+        save_path: Optional path to save the figure.
+    """
+    n_conditions = len(condition_order)
+    fig, axes = plt.subplots(1, n_conditions, figsize=(6 * n_conditions, 6), sharey=True)
+
+    if n_conditions == 1:
+        axes = [axes]
+
+    # Get global y-axis limits for consistent scaling
+    all_means = []
+    all_stds = []
+    for condition in condition_order:
+        cond_df = df[df[condition_col] == condition]
+        stats = cond_df.groupby(layer_col)[l0_col].agg(['mean', 'std']).reset_index()
+        all_means.extend(stats['mean'].values)
+        all_stds.extend(stats['std'].values)
+
+    y_max = max(m + s for m, s in zip(all_means, all_stds)) * 1.1
+
+    for i, (condition, ax) in enumerate(zip(condition_order, axes)):
+        cond_df = df[df[condition_col] == condition]
+
+        # Compute mean and std per layer
+        stats = cond_df.groupby(layer_col)[l0_col].agg(['mean', 'std']).reset_index()
+        layers = stats[layer_col].values
+        means = stats['mean'].values
+        stds = stats['std'].values
+
+        color = CUSTOM_PALETTE[i % len(CUSTOM_PALETTE)]
+
+        # Create bar chart
+        bars = ax.bar(layers, means, yerr=stds, capsize=2, color=color, alpha=0.8,
+                      edgecolor='white', linewidth=0.5, error_kw={'elinewidth': 1})
+
+        ax.set_xlabel("Layer", labelpad=10)
+        if i == 0:
+            ax.set_ylabel("L0 (Active Features)", labelpad=10)
+        ax.set_title(condition, pad=10, fontweight='bold')
+        ax.set_ylim(0, y_max)
+        ax.set_xticks(layers[::2])  # Show every other layer to avoid crowding
+
+        sns.despine(ax=ax, left=(i > 0), bottom=True)
+
+    plt.suptitle("L0 Per Layer by Condition", fontsize=14, fontweight='bold', y=1.02)
     plt.tight_layout()
 
     if save_path:

@@ -147,7 +147,8 @@ def analyze_conditions_post_run(dirs: List[Path],
 
 
 def run_for_config(config_dir: Path, config_name: str,
-                   run_error_analysis: bool, submodel_num: int = 0
+                   run_error_analysis: bool, submodel_num: int = 0,
+                   prompt_ids: Optional[List[str]] = None
                    ) -> Dict[SupportedConfigAnalyzeStep, Any]:
     """
     Runs the main logic for a specified prompt config.
@@ -157,13 +158,14 @@ def run_for_config(config_dir: Path, config_name: str,
         config_name: Name of the config file (without .json extension).
         run_error_analysis: Whether to run error ranking analysis.
         submodel_num: Index of submodel to use.
+        prompt_ids: Optional list of prompt IDs to override config/env.
 
     Returns:
         Dictionary mapping SupportedConfigAnalyzeStep to results.
     """
     config_path = config_dir / f"{config_name}.json"
     try:
-        config = AnalysisConfig.from_file(config_path)
+        config = AnalysisConfig.from_file(config_path, prompt_ids_override=prompt_ids)
     except Exception as e:
         print(f"Unable to load {config_name}")
         raise e
@@ -198,6 +200,7 @@ def run_for_config(config_dir: Path, config_name: str,
             prompts_with_unique_features=diff_prompt_ids,
             prompts_with_shared_features=sim_prompt_ids,
             comparison_prompt_ids=comparison_ids,
+            metrics2run='all',
             use_same_token=True
         )
         print("==================================\n")
@@ -212,7 +215,7 @@ def run_for_config(config_dir: Path, config_name: str,
             token_of_interest=config.token_of_interest,
             top_k_tokens=TOP_K
         )
-    elif config.task == Task.COMBINED_COMPARE:
+    elif config.task == Task.FEATURE_OVERLAP:
         print(f"\nStarting combined comparison for {config_name} with model {model} and submodel {submodel}")
         print("==================================")
 
@@ -223,8 +226,6 @@ def run_for_config(config_dir: Path, config_name: str,
             SupportedConfigAnalyzeStep.FEATURE_OVERLAP,
             main_prompt_id=config.main_prompt_id,
             comparison_prompt_ids=config.diff_prompt_ids,
-            debug=False,
-            filter_by_act_density=50
         )
         combined_metrics = results[SupportedConfigAnalyzeStep.FEATURE_OVERLAP]
         print(f"Combined metrics: unique_frac={combined_metrics[FeatureSharingMetrics.UNIQUE_FRAC]:.3f}, "
@@ -247,6 +248,15 @@ def run_for_config(config_dir: Path, config_name: str,
             SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION
         )
         print("==================================\n")
+    elif config.task == Task.L0_REPLACEMENT_MODEL:
+        print(f"\nStarting L0 replacement model analysis for {config_name} with model {model} and submodel {submodel}")
+        print("==================================")
+
+        results |= analyzer.run(
+            SupportedConfigAnalyzeStep.L0_REPLACEMENT_MODEL,
+            sub_model=submodel_num
+        )
+        print("==================================\n")
     else:
         raise NotImplementedError(f"Unknown task: {config.task}")
 
@@ -258,19 +268,24 @@ def get_results_base_dir() -> Path:
     Get the base directory for saving results.
 
     Uses RESULTS_DIR env var if set, otherwise generates from current datetime.
+    If RESULTS_DIR is set but already exists, appends datetime to make it unique.
 
     Returns:
         Path to the results base directory.
     """
-    results_dir = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if dirname := os.getenv("RESULTS_DIR", "").strip():
-        results_dir = dirname
-    return OUTPUT_DIR / results_dir
+        results_path = OUTPUT_DIR / dirname
+        if results_path.exists():
+            results_path = OUTPUT_DIR / f"{dirname}_{timestamp}"
+        return results_path
+    return OUTPUT_DIR / timestamp
 
 
 def run_for_all_configs(config_names: List[str] = None, config_dir: str = None,
                         run_error_analysis: bool = False, submodel_num: int = 0,
-                        save_path: Optional[Path] = None
+                        save_path: Optional[Path] = None,
+                        prompt_ids: Optional[List[str]] = None
                         ) -> Dict[SupportedConfigAnalyzeStep, Any]:
     """
     Runs analysis across all configs. The task type (prompt, token, or combined)
@@ -283,6 +298,7 @@ def run_for_all_configs(config_names: List[str] = None, config_dir: str = None,
         submodel_num: Index of submodel to use.
         save_path: Optional path for saving results. If not provided, generates from
             RESULTS_DIR env var or current datetime.
+        prompt_ids: Optional list of prompt IDs to override config/env.
 
     Returns:
         Dictionary of cross-config results from CrossConfigAnalyzer.
@@ -300,7 +316,8 @@ def run_for_all_configs(config_names: List[str] = None, config_dir: str = None,
         config = config.strip()
         config_results = run_for_config(
             config_dir, config, submodel_num=submodel_num,
-            run_error_analysis=run_error_analysis
+            run_error_analysis=run_error_analysis,
+            prompt_ids=prompt_ids
         )
         all_config_results[config] = config_results
 
@@ -311,13 +328,38 @@ def run_for_all_configs(config_names: List[str] = None, config_dir: str = None,
     return analyzer.run()
 
 
+def get_prompt_ids_for_condition(
+        prompt_ids_per_condition: Optional[List[List[str]]],
+        condition_idx: int
+) -> Optional[List[str]]:
+    """
+    Get prompt IDs for a specific condition index.
+
+    Args:
+        prompt_ids_per_condition: List of prompt ID lists, one per condition.
+            If single list, used for all conditions. If None, returns None.
+        condition_idx: Index of the condition.
+
+    Returns:
+        List of prompt IDs for the condition, or None if not specified.
+    """
+    if prompt_ids_per_condition is None:
+        return None
+    if len(prompt_ids_per_condition) == 1:
+        return prompt_ids_per_condition[0]
+    if condition_idx < len(prompt_ids_per_condition):
+        return prompt_ids_per_condition[condition_idx]
+    return None
+
+
 def run_cross_condition_analysis(
         config_dirs: Optional[List[str]] = None,
         config_names: Optional[List[str]] = None,
         submodel_nums: Optional[List[int]] = None,
         run_error_analysis: bool = False,
         condition_order: Optional[List[str]] = None,
-        config_order: Optional[List[str]] = None
+        config_order: Optional[List[str]] = None,
+        prompt_ids_per_condition: Optional[List[List[str]]] = None
 ) -> Dict[str, Any]:
     """
     Runs cross-condition analysis by iterating through multiple config directories
@@ -337,6 +379,8 @@ def run_cross_condition_analysis(
         run_error_analysis: Whether to run error ranking analysis.
         condition_order: Order for conditions in plots (optional).
         config_order: Order for configs in plots (optional).
+        prompt_ids_per_condition: List of prompt ID lists, one per condition.
+            If single list provided, used for all conditions. If None, uses config/env.
 
     Returns:
         Dictionary mapping step names to their results.
@@ -351,8 +395,8 @@ def run_cross_condition_analysis(
     if len(config_dirs) > 1:
         # Iterate over config directories, use single submodel
         submodel_num = submodel_nums[0]
-        for config_dir in config_dirs:
-            condition_name = Path(config_dir).name
+        for idx, config_dir in enumerate(config_dirs):
+            condition_name = Path(config_dir).name or "default"
             print(f"\n{'='*50}")
             print(f"Running condition: {condition_name}")
             print(f"{'='*50}")
@@ -362,7 +406,8 @@ def run_cross_condition_analysis(
                 config_dir=config_dir,
                 run_error_analysis=run_error_analysis,
                 submodel_num=submodel_num,
-                save_path=base_results_dir / condition_name
+                save_path=base_results_dir / condition_name,
+                prompt_ids=get_prompt_ids_for_condition(prompt_ids_per_condition, idx)
             )
             condition_results[condition_name] = cross_config_results
 
@@ -370,7 +415,7 @@ def run_cross_condition_analysis(
         # Iterate over submodels, use single config_dir
         config_dir = config_dirs[0] if config_dirs else ""
 
-        for submodel_num in submodel_nums:
+        for idx, submodel_num in enumerate(submodel_nums):
             condition_name = SUBMODELS[submodel_num]
             print(f"\n{'='*50}")
             print(f"Running condition: {condition_name}")
@@ -381,7 +426,8 @@ def run_cross_condition_analysis(
                 config_dir=config_dir,
                 run_error_analysis=run_error_analysis,
                 submodel_num=submodel_num,
-                save_path=base_results_dir / condition_name
+                save_path=base_results_dir / condition_name,
+                prompt_ids=get_prompt_ids_for_condition(prompt_ids_per_condition, idx)
             )
             condition_results[condition_name] = cross_config_results
 

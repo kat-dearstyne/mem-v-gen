@@ -21,7 +21,7 @@ class ConfigSubgraphFilterStep(ConfigAnalyzeStep):
                  prompts_with_shared_features: List[str] = None,
                  prompts_with_unique_features: List[str] = None,
                  metrics2run: Set[ComparisonMetrics] = None,
-                 create_subgraph: bool = True,
+                 create_subgraph: bool = False,
                  **kwargs):
         """
         Args:

@@ -80,3 +80,72 @@ class ComplexityMetrics(Metrics):
     """Metrics for measuring token complexity."""
     ZIPF_FREQUENCY = "zipf_frequency"
     TOKEN_LENGTH = "token_length"
+
+
+class EarlyLayerMetrics(Metrics):
+    """Metrics for early layer contribution analysis."""
+    MAX_LAYER = "max_layer"
+    EARLY_LAYER_FRACTION = "early_layer_fraction"
+
+
+class SignificanceMetrics(Metrics):
+    """Metrics for pairwise significance testing."""
+    GROUP1_MEAN = "group1_mean"
+    GROUP2_MEAN = "group2_mean"
+    GROUP1_STD = "group1_std"
+    GROUP2_STD = "group2_std"
+    N_PER_GROUP = "n_per_group"
+    T_STATISTIC = "t_statistic"
+    T_P_VALUE = "t_p_value"
+    T_SIGNIFICANT = "t_significant"
+    MANN_WHITNEY_U = "mann_whitney_u"
+    MW_P_VALUE = "mw_p_value"
+    MW_SIGNIFICANT = "mw_significant"
+    COHENS_D = "cohens_d"
+    RANK_BISERIAL_R = "rank_biserial_r"
+
+
+class OmnibusSignificanceMetrics(Metrics):
+    """Metrics for omnibus significance testing (ANOVA/Kruskal-Wallis)."""
+    F_STATISTIC = "f_statistic"
+    ANOVA_P_VALUE = "anova_p_value"
+    ANOVA_SIGNIFICANT = "anova_significant"
+    ETA_SQUARED = "eta_squared"
+    H_STATISTIC = "h_statistic"
+    KRUSKAL_P_VALUE = "kruskal_p_value"
+    KRUSKAL_SIGNIFICANT = "kruskal_significant"
+    EPSILON_SQUARED = "epsilon_squared"
+
+
+class PooledStatsMetrics(Metrics):
+    """Metrics for pooled error ranking statistics."""
+    MEAN = "mean"
+    MEDIAN = "median"
+    WILCOXON_STAT_ONESIDED = "wilcoxon_stat_onesided"
+    WILCOXON_P_ONESIDED = "wilcoxon_p_onesided"
+    COUNT_BASE_GT_OTHER = "count_base_gt_other"
+    COUNT_BASE_LT_OTHER = "count_base_lt_other"
+    COUNT_EQUAL = "count_equal"
+    N_SAMPLES = "n_samples"
+
+
+class ConditionStatsMetrics(Metrics):
+    """Metrics for condition-level error ranking statistics."""
+    MEAN = "mean"
+    MEDIAN = "median"
+    WILCOXON_STAT = "wilcoxon_stat"
+    WILCOXON_P = "wilcoxon_p"
+    TTEST_STAT = "ttest_stat"
+    TTEST_P = "ttest_p"
+    COUNT_G1_GT_G2 = "count_g1_gt_g2"
+    COUNT_G1_LT_G2 = "count_g1_lt_g2"
+    COUNT_EQUAL = "count_equal"
+
+
+class RawScoreMetrics(Metrics):
+    """Metrics for raw error ranking scores."""
+    METRIC = "metric"
+    SAMPLE = "sample"
+    G1_SCORE = "g1_score"
+    G2_SCORE = "g2_score"
+    DELTA = "delta"

@@ -9,6 +9,9 @@ from src.analysis.cross_config_analysis.cross_config_early_layer_contribution_st
 )
 from src.analysis.cross_config_analysis.cross_config_error_ranking_step import CrossConfigErrorRankingStep
 from src.analysis.cross_config_analysis.cross_config_feature_overlap_step import CrossConfigFeatureOverlapStep
+from src.analysis.cross_config_analysis.cross_config_l0_replacement_model_step import (
+    CrossConfigL0ReplacementModelStep
+)
 from src.analysis.cross_config_analysis.cross_config_replacement_model_accuracy_step import (
     CrossConfigReplacementModelAccuracyStep
 )
@@ -18,6 +21,7 @@ STEP2CLASS: Dict[SupportedConfigAnalyzeStep, Type[CrossConfigAnalyzeStep]] = {
     SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION: CrossConfigEarlyLayerContributionStep,
     SupportedConfigAnalyzeStep.ERROR_RANKING: CrossConfigErrorRankingStep,
     SupportedConfigAnalyzeStep.FEATURE_OVERLAP: CrossConfigFeatureOverlapStep,
+    SupportedConfigAnalyzeStep.L0_REPLACEMENT_MODEL: CrossConfigL0ReplacementModelStep,
     SupportedConfigAnalyzeStep.REPLACEMENT_MODEL: CrossConfigReplacementModelAccuracyStep,
     SupportedConfigAnalyzeStep.SUBGRAPH_FILTER: CrossConfigSubgraphFilterStep,
 }

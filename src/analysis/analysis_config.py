@@ -10,9 +10,10 @@ from src.utils import load_json, get_env_list
 class Task:
     PROMPT_SUBGRAPH_COMPARE = "prompt"
     TOKEN_SUBGRAPH_COMPARE = "token"
-    COMBINED_COMPARE = "combined"
+    FEATURE_OVERLAP = "feature_overlap"
     REPLACEMENT_MODEL = "replacement_model"
     EARLY_LAYER_CONTRIBUTION = "early_layer"
+    L0_REPLACEMENT_MODEL = "l0"
 
 
 @dataclass
@@ -28,12 +29,13 @@ class AnalysisConfig:
     memorized_completion: Optional[str] = None
 
     @classmethod
-    def from_file(cls, config_path: Path) -> "AnalysisConfig":
+    def from_file(cls, config_path: Path, prompt_ids_override: List[str] = None) -> "AnalysisConfig":
         """
         Load an AnalysisConfig from a JSON file.
 
         Args:
             config_path: Path to the JSON config file.
+            prompt_ids_override: Optional list of prompt IDs to use instead of config/env.
 
         Returns:
             AnalysisConfig instance with values from file and environment.
@@ -46,9 +48,12 @@ class AnalysisConfig:
         token_of_interest = config_data.get("TOKEN_OF_INTEREST")
         memorized_completion = config_data.get("MEMORIZED_COMPLETION")
 
-        # Parse prompt IDs from config or environment
+        # Parse prompt IDs: override > config > environment
         all_prompts = [main_prompt] + diff_prompts + sim_prompts
-        prompt_ids = cls._parse_prompt_ids(config_data.get("PROMPT_IDS"), all_prompts)
+        prompt_ids = cls._parse_prompt_ids(
+            config_data.get("PROMPT_IDS") or prompt_ids_override,
+            all_prompts
+        )
 
         # Get task from config and environment, config takes priority
         config_task = config_data.get("TASK")

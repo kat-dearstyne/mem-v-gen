@@ -4,6 +4,7 @@ from src.analysis.config_analysis.config_analyze_step import ConfigAnalyzeStep
 from src.analysis.config_analysis.config_early_layer_contribution_step import ConfigEarlyLayerContributionStep
 from src.analysis.config_analysis.config_error_ranking_step import ConfigErrorRankingStep
 from src.analysis.config_analysis.config_feature_overlap_step import ConfigFeatureOverlapStep
+from src.analysis.config_analysis.config_l0_replacement_model_step import ConfigL0ReplacementModelStep
 from src.analysis.config_analysis.config_replacement_model_accuracy_step import ConfigReplacementModelAccuracyStep
 from src.analysis.config_analysis.config_subgraph_filter_step import ConfigSubgraphFilterStep
 from src.analysis.config_analysis.config_token_subgraph_step import ConfigTokenSubgraphStep
@@ -15,6 +16,7 @@ STEP2CLASS: Dict[SupportedConfigAnalyzeStep, Type[ConfigAnalyzeStep]] = {
     SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION: ConfigEarlyLayerContributionStep,
     SupportedConfigAnalyzeStep.ERROR_RANKING: ConfigErrorRankingStep,
     SupportedConfigAnalyzeStep.FEATURE_OVERLAP: ConfigFeatureOverlapStep,
+    SupportedConfigAnalyzeStep.L0_REPLACEMENT_MODEL: ConfigL0ReplacementModelStep,
     SupportedConfigAnalyzeStep.REPLACEMENT_MODEL: ConfigReplacementModelAccuracyStep,
     SupportedConfigAnalyzeStep.SUBGRAPH_FILTER: ConfigSubgraphFilterStep,
     SupportedConfigAnalyzeStep.TOKEN_SUBGRAPH: ConfigTokenSubgraphStep

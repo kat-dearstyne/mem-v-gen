@@ -20,8 +20,14 @@ from src.analysis.cross_condition_analysis.cross_condition_feature_overlap_visua
 from src.analysis.cross_condition_analysis.cross_condition_shared_features_visualization_step import (
     CrossConditionSharedFeaturesVisualizationStep
 )
+from src.analysis.cross_condition_analysis.cross_condition_early_layer_step import (
+    CrossConditionEarlyLayerStep, DEFAULT_PRIMARY_THRESHOLD
+)
 from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import (
     CONFIG_NAME_COL, PROMPT_TYPE_COL, SHARED_FEATURES_KEY
+)
+from src.analysis.cross_config_analysis.cross_config_early_layer_contribution_step import (
+    EARLY_LAYER_FRACTION_COL, MAX_LAYER_COL
 )
 from src.analysis.cross_condition_analysis.cross_condition_analyze_step import DEFAULT_CONDITION_COL as CONDITION_COL
 from src.metrics import ComparisonMetrics, FeatureSharingMetrics
@@ -65,6 +71,26 @@ class TestCrossConditionAnalyzerFixtures:
             FeatureSharingMetrics.UNIQUE_WEIGHT.value: [0.40, 0.45],
             FeatureSharingMetrics.SHARED_WEIGHT.value: [0.60, 0.55],
         })
+
+    @staticmethod
+    def create_early_layer_df(max_layers: list = None) -> pd.DataFrame:
+        """Create mock early layer contribution DataFrame."""
+        if max_layers is None:
+            max_layers = [2]
+
+        rows = []
+        for max_layer in max_layers:
+            rows.extend([
+                {CONFIG_NAME_COL: "config1", PROMPT_TYPE_COL: "memorized",
+                 MAX_LAYER_COL: max_layer, EARLY_LAYER_FRACTION_COL: 0.5 + max_layer * 0.05},
+                {CONFIG_NAME_COL: "config1", PROMPT_TYPE_COL: "random",
+                 MAX_LAYER_COL: max_layer, EARLY_LAYER_FRACTION_COL: 0.3 + max_layer * 0.05},
+                {CONFIG_NAME_COL: "config2", PROMPT_TYPE_COL: "memorized",
+                 MAX_LAYER_COL: max_layer, EARLY_LAYER_FRACTION_COL: 0.55 + max_layer * 0.05},
+                {CONFIG_NAME_COL: "config2", PROMPT_TYPE_COL: "random",
+                 MAX_LAYER_COL: max_layer, EARLY_LAYER_FRACTION_COL: 0.35 + max_layer * 0.05},
+            ])
+        return pd.DataFrame(rows)
 
     @staticmethod
     def create_condition_results() -> Dict[str, Dict[SupportedConfigAnalyzeStep, Any]]:
@@ -349,6 +375,102 @@ class TestCrossConditionAnalyzer(unittest.TestCase):
         self.assertIn(CrossConditionOverlapVisualizationStep, CROSS_CONDITION_STEPS)
         self.assertIn(CrossConditionFeatureOverlapVisualizationStep, CROSS_CONDITION_STEPS)
         self.assertIn(CrossConditionSharedFeaturesVisualizationStep, CROSS_CONDITION_STEPS)
+
+
+class TestCrossConditionEarlyLayerStep(unittest.TestCase):
+    """Tests for CrossConditionEarlyLayerStep."""
+
+    def test_config_results_key_is_early_layer_contribution(self):
+        """Test that step uses EARLY_LAYER_CONTRIBUTION key."""
+        step = CrossConditionEarlyLayerStep()
+        self.assertEqual(step.CONFIG_RESULTS_KEY, SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION)
+
+    def test_default_primary_threshold_is_2(self):
+        """Test that default primary_threshold is 2."""
+        step = CrossConditionEarlyLayerStep()
+        self.assertEqual(step.primary_threshold, DEFAULT_PRIMARY_THRESHOLD)
+        self.assertEqual(step.primary_threshold, 2)
+
+    def test_custom_primary_threshold(self):
+        """Test that custom primary_threshold is stored."""
+        step = CrossConditionEarlyLayerStep(primary_threshold=5)
+        self.assertEqual(step.primary_threshold, 5)
+
+    def test_run_returns_none_when_no_data(self):
+        """Test that run returns None when no data found."""
+        condition_results = {"cond1": {}}
+
+        step = CrossConditionEarlyLayerStep()
+        result = step.run(condition_results)
+
+        self.assertIsNone(result)
+
+    @patch('src.analysis.cross_condition_analysis.cross_condition_early_layer_step.plot_early_layer_boxplot')
+    @patch('src.analysis.cross_condition_analysis.cross_condition_early_layer_step.plot_early_layer_mean_comparison')
+    @patch('src.analysis.cross_condition_analysis.cross_condition_early_layer_step.plot_significance_effect_sizes')
+    def test_run_with_single_threshold_returns_data(self, *mocks):
+        """Test that run with single threshold returns combined data."""
+        condition_results = {
+            "cond1": {
+                SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION:
+                    TestCrossConditionAnalyzerFixtures.create_early_layer_df([2])
+            },
+            "cond2": {
+                SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION:
+                    TestCrossConditionAnalyzerFixtures.create_early_layer_df([2])
+            },
+        }
+
+        step = CrossConditionEarlyLayerStep()
+        result = step.run(condition_results)
+
+        self.assertIsNotNone(result)
+        self.assertIn('data', result)
+        self.assertIn('statistics', result)
+
+    @patch('src.analysis.cross_condition_analysis.cross_condition_early_layer_step.plot_early_layer_boxplot')
+    @patch('src.analysis.cross_condition_analysis.cross_condition_early_layer_step.plot_early_layer_mean_comparison')
+    @patch('src.analysis.cross_condition_analysis.cross_condition_early_layer_step.plot_significance_effect_sizes')
+    @patch('src.analysis.cross_condition_analysis.cross_condition_early_layer_step.plot_early_layer_threshold_comparison')
+    def test_run_with_multiple_thresholds_calls_threshold_comparison(self, mock_threshold, *other_mocks):
+        """Test that multiple thresholds trigger threshold comparison plot."""
+        condition_results = {
+            "cond1": {
+                SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION:
+                    TestCrossConditionAnalyzerFixtures.create_early_layer_df([1, 2, 3])
+            },
+            "cond2": {
+                SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION:
+                    TestCrossConditionAnalyzerFixtures.create_early_layer_df([1, 2, 3])
+            },
+        }
+
+        step = CrossConditionEarlyLayerStep()
+        step.run(condition_results)
+
+        mock_threshold.assert_called_once()
+
+    @patch('src.analysis.cross_condition_analysis.cross_condition_early_layer_step.plot_early_layer_boxplot')
+    @patch('src.analysis.cross_condition_analysis.cross_condition_early_layer_step.plot_early_layer_mean_comparison')
+    @patch('src.analysis.cross_condition_analysis.cross_condition_early_layer_step.plot_significance_effect_sizes')
+    @patch('src.analysis.cross_condition_analysis.cross_condition_early_layer_step.plot_early_layer_threshold_comparison')
+    def test_run_with_single_threshold_skips_threshold_comparison(self, mock_threshold, *other_mocks):
+        """Test that single threshold skips threshold comparison plot."""
+        condition_results = {
+            "cond1": {
+                SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION:
+                    TestCrossConditionAnalyzerFixtures.create_early_layer_df([2])
+            },
+            "cond2": {
+                SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION:
+                    TestCrossConditionAnalyzerFixtures.create_early_layer_df([2])
+            },
+        }
+
+        step = CrossConditionEarlyLayerStep()
+        step.run(condition_results)
+
+        mock_threshold.assert_not_called()
 
 
 if __name__ == '__main__':

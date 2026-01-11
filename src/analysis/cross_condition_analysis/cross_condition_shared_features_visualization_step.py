@@ -36,6 +36,7 @@ class CrossConditionSharedFeaturesVisualizationStep(CrossConditionAnalyzeStep):
 
         condition_order, config_order = self.get_ordering(combined_df)
         plot_shared_feature_metrics(combined_df, save_dir=self.save_path,
-                                    condition_order=condition_order, config_order=config_order)
+                                    condition_order=condition_order, config_order=config_order,
+                                    condition_col=self.CONDITION_COL)
 
         return combined_df

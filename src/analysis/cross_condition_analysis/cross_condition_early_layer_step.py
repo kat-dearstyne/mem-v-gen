@@ -9,13 +9,21 @@ from src.analysis.config_analysis.supported_config_analyze_step import Supported
 from src.analysis.cross_condition_analysis.cross_condition_analyze_step import (
     CrossConditionAnalyzeStep
 )
-from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import CONFIG_NAME_COL
-from src.analysis.cross_config_analysis.cross_config_early_layer_contribution_step import EARLY_LAYER_FRACTION_COL
+from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import (
+    CONFIG_NAME_COL, PROMPT_TYPE_COL
+)
+from src.analysis.cross_config_analysis.cross_config_early_layer_contribution_step import (
+    EARLY_LAYER_FRACTION_COL, MAX_LAYER_COL
+)
+from src.metrics import EarlyLayerMetrics
 from src.visualizations import (
     plot_early_layer_boxplot,
     plot_early_layer_mean_comparison,
     plot_early_layer_by_config,
-    plot_significance_effect_sizes
+    plot_significance_effect_sizes,
+    plot_early_layer_threshold_comparison,
+    plot_early_layer_by_prompt_type,
+    plot_early_layer_prompt_type_lines
 )
 
 # Output filenames
@@ -24,6 +32,7 @@ EARLY_LAYER_STATS_FILENAME = "early_layer_stats.csv"
 EARLY_LAYER_SIGNIFICANCE_FILENAME = "early_layer_significance.csv"
 
 SIGNIFICANCE_THRESHOLD = 0.05
+DEFAULT_PRIMARY_THRESHOLD = 2
 
 
 class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
@@ -36,6 +45,16 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
 
     CONFIG_RESULTS_KEY = SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION
     RESULTS_SUB_KEY = None
+
+    def __init__(self, primary_threshold: int = DEFAULT_PRIMARY_THRESHOLD, **kwargs):
+        """
+        Args:
+            primary_threshold: Max layer threshold to use for primary analysis when
+                multiple thresholds are present. Defaults to 2.
+            **kwargs: Additional arguments passed to parent.
+        """
+        super().__init__(**kwargs)
+        self.primary_threshold = primary_threshold
 
     def run(self, condition_results: Dict[str, Dict[SupportedConfigAnalyzeStep, Any]]) -> Optional[Dict[str, Any]]:
         """
@@ -54,18 +73,38 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
 
         condition_order, config_order = self.get_ordering(combined_df)
 
-        # Calculate statistics
-        stats_results = self._calculate_statistics(combined_df, condition_order)
+        # Check if we have multiple max_layer values
+        max_layers = sorted(combined_df[MAX_LAYER_COL].unique()) if MAX_LAYER_COL in combined_df.columns else [self.primary_threshold]
+        has_multiple_thresholds = len(max_layers) > 1
 
-        # Generate visualizations
-        self._generate_visualizations(combined_df, stats_results, condition_order, config_order)
+        # Filter to primary threshold for statistics and main visualizations
+        if has_multiple_thresholds:
+            primary_df = combined_df[combined_df[MAX_LAYER_COL] == self.primary_threshold].copy()
+        else:
+            primary_df = combined_df
+
+        # Calculate statistics on primary threshold data
+        stats_results = self._calculate_statistics(primary_df, condition_order)
+
+        # Generate visualizations for primary threshold
+        self._generate_visualizations(primary_df, stats_results, condition_order, config_order)
+
+        # Generate threshold comparison visualization if multiple thresholds
+        if has_multiple_thresholds:
+            plot_early_layer_threshold_comparison(
+                combined_df, condition_order, max_layers,
+                condition_col=self.CONDITION_COL,
+                save_path=self.save_path / 'early_layer_threshold_comparison.png' if self.save_path else None
+            )
 
         # Save results
         if self.save_path:
             self.save_path.mkdir(parents=True, exist_ok=True)
             combined_df.to_csv(self.save_path / EARLY_LAYER_COMPARISON_FILENAME, index=False)
 
-            stats_df = pd.DataFrame([stats_results])
+            # Filter out DataFrame from stats before saving
+            stats_to_save = {k: v for k, v in stats_results.items() if not isinstance(v, pd.DataFrame)}
+            stats_df = pd.DataFrame([stats_to_save])
             stats_df.to_csv(self.save_path / EARLY_LAYER_STATS_FILENAME, index=False)
 
         return {
@@ -196,6 +235,9 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
                 save_path=save_path / 'early_layer_by_config.png' if save_path else None
             )
 
+        # Prompt type comparisons across conditions
+        self._generate_prompt_type_visualizations(df, condition_order)
+
         # Significance effect size visualization
         sig_df = stats_results.get('_significance_df')
         if sig_df is not None and save_path:
@@ -207,3 +249,34 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
                 t_sig_col='t_significant',
                 mw_sig_col='mw_significant'
             )
+
+    def _generate_prompt_type_visualizations(self, df: pd.DataFrame,
+                                              condition_order: List[str]) -> None:
+        """
+        Generates visualizations comparing conditions across prompt types.
+
+        Args:
+            df: Combined DataFrame with early layer fractions.
+            condition_order: Order of conditions.
+        """
+        if PROMPT_TYPE_COL not in df.columns:
+            return
+
+        prompt_type_order = sorted(df[PROMPT_TYPE_COL].unique())
+        if not prompt_type_order:
+            return
+
+        save_path = self.save_path
+
+        plot_early_layer_by_prompt_type(
+            df, condition_order, prompt_type_order,
+            condition_col=self.CONDITION_COL,
+            prompt_type_col=PROMPT_TYPE_COL,
+            save_path=save_path / 'early_layer_by_prompt_type.png' if save_path else None
+        )
+        plot_early_layer_prompt_type_lines(
+            df, condition_order, prompt_type_order,
+            condition_col=self.CONDITION_COL,
+            prompt_type_col=PROMPT_TYPE_COL,
+            save_path=save_path / 'early_layer_prompt_type_lines.png' if save_path else None
+        )

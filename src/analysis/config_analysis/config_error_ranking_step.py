@@ -45,7 +45,7 @@ class ConfigErrorRankingStep(ConfigAnalyzeStep):
         """
         self.main_prompt_id = main_prompt_id
         self.comparison_prompt_ids = comparison_prompt_ids
-        self.metrics2run = {e for e in ErrorRankingMetrics} if not metrics2run else metrics2run
+        self.metrics2run = {e for e in ErrorRankingMetrics} if metrics2run == 'all' else metrics2run
         self.use_same_token = use_same_token
         self.metric_fns = {
             ErrorRankingMetrics.TOP_K: self.top_k_error_proportion,
@@ -62,6 +62,8 @@ class ConfigErrorRankingStep(ConfigAnalyzeStep):
             Dictionary mapping comparison labels to results.
         """
         results = {}
+        if not self.metrics2run:
+            return results
         comparison_ids = self.comparison_prompt_ids or [
             p_id for p_id in self.graph_analyzer.graphs.keys()
             if p_id != self.main_prompt_id

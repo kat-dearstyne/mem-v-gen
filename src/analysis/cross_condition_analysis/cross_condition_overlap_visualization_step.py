@@ -31,20 +31,6 @@ VISUALIZATION_METRICS = [
 ]
 
 
-def metric_to_title(metric: ComparisonMetrics) -> str:
-    """
-    Converts metric enum to display title.
-
-    Args:
-        metric: The comparison metric enum value.
-
-    Returns:
-        Title-cased string with underscores replaced by spaces
-        (e.g., 'jaccard_index' -> 'Jaccard Index').
-    """
-    return metric.value.replace('_', ' ').title()
-
-
 class CrossConditionOverlapVisualizationStep(CrossConditionAnalyzeStep):
     """
     Cross-condition step for overlap analysis visualizations.
@@ -121,7 +107,7 @@ class CrossConditionOverlapVisualizationStep(CrossConditionAnalyzeStep):
         """
         save_path = self.save_path
         col = metric.value
-        title = metric_to_title(metric)
+        title = metric.get_printable()
 
         # Bar chart
         plot_metric_by_condition(
@@ -129,7 +115,8 @@ class CrossConditionOverlapVisualizationStep(CrossConditionAnalyzeStep):
             title=f'{title} by Condition',
             ylabel=title,
             condition_order=condition_order, config_order=config_order,
-            save_path=save_path / f"{col}_bar.png" if save_path else None
+            condition_col=self.CONDITION_COL,
+            save_path=save_path / f"{col}_bar.png" if save_path else None,
         )
 
         # Heatmap
@@ -138,6 +125,7 @@ class CrossConditionOverlapVisualizationStep(CrossConditionAnalyzeStep):
             title=f'{title} Heatmap',
             cbar_label=title,
             condition_order=condition_order, config_order=config_order,
+            condition_col=self.CONDITION_COL,
             save_path=save_path / f"{col}_heatmap.png" if save_path else None
         )
 
@@ -147,6 +135,7 @@ class CrossConditionOverlapVisualizationStep(CrossConditionAnalyzeStep):
             title=f'{title} Distribution by Condition',
             ylabel=title,
             condition_order=condition_order,
+            condition_col=self.CONDITION_COL,
             save_path=save_path / f"{col}_boxplot.png" if save_path else None
         )
 
@@ -157,6 +146,7 @@ class CrossConditionOverlapVisualizationStep(CrossConditionAnalyzeStep):
             title=f'{title} by Config',
             ylabel=title,
             condition_order=condition_order, config_order=config_order,
+            condition_col=self.CONDITION_COL,
             extra_series=extra,
             save_path=save_path / f"{col}_line.png" if save_path else None
         )
@@ -185,31 +175,35 @@ class CrossConditionOverlapVisualizationStep(CrossConditionAnalyzeStep):
         if not has_probability or not has_jaccard:
             return
 
-        jaccard_title = metric_to_title(ComparisonMetrics.JACCARD_INDEX)
+        jaccard_title = ComparisonMetrics.JACCARD_INDEX.get_printable()
         plot_metric_vs_probability_scatter(
             df, metric_col=jaccard_col,
             title=f'{jaccard_title} vs Output Probability',
             xlabel=jaccard_title,
             condition_order=condition_order,
+            condition_col=self.CONDITION_COL,
             save_path=save_path / f"{jaccard_col}_vs_probability.png" if save_path else None
         )
 
         if has_weighted:
-            weighted_title = metric_to_title(ComparisonMetrics.WEIGHTED_JACCARD)
+            weighted_title = ComparisonMetrics.WEIGHTED_JACCARD.get_printable()
             plot_metric_vs_probability_scatter(
                 df, metric_col=weighted_col,
                 title=f'{weighted_title} vs Output Probability',
                 xlabel=weighted_title,
                 condition_order=condition_order,
+                condition_col=self.CONDITION_COL,
                 save_path=save_path / f"{weighted_col}_vs_probability.png" if save_path else None
             )
 
             plot_metric_vs_probability_combined(
                 df, condition_order=condition_order,
+                condition_col=self.CONDITION_COL,
                 save_path=save_path / "jaccard_metrics_vs_probability.png" if save_path else None
             )
 
         plot_correlation_heatmap(
             df, condition_order=condition_order,
+            condition_col=self.CONDITION_COL,
             save_path=save_path / "metric_correlations.png" if save_path else None
         )

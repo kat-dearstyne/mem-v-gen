@@ -1,4 +1,3 @@
-from collections import namedtuple
 from pathlib import Path
 from typing import Any
 
@@ -11,22 +10,13 @@ from src.constants import TOP_K
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
 from src.analysis.config_analysis.config_replacement_model_accuracy_step import ConfigReplacementModelAccuracyStep
 from src.analysis.cross_config_analysis.cross_config_analyze_step import CrossConfigAnalyzeStep
-from src.metrics import Metrics, ReplacementAccuracyMetrics, ComplexityMetrics
-from src.utils import load_json, create_label_from_conditions, get_as_safe_name
+from src.metrics import (
+    Metrics, ReplacementAccuracyMetrics, ComplexityMetrics,
+    SignificanceMetrics, OmnibusSignificanceMetrics
+)
+from src.utils import load_json, save_json, create_label_from_conditions, get_as_safe_name
 from src.visualizations import plot_error_hypothesis_combined_boxplot, plot_error_hypothesis_metrics, \
     plot_significance_effect_sizes, plot_omnibus_effect_sizes, plot_per_position_curves, plot_token_complexity
-
-SignificanceStats = namedtuple("SignificanceStats", [
-    "group1_mean", "group2_mean", "group1_std", "group2_std", "n_per_group",
-    "t_statistic", "t_p_value", "t_significant",
-    "mann_whitney_u", "mw_p_value", "mw_significant",
-    "cohens_d", "rank_biserial_r"
-])
-
-OmnibusSignificanceResult = namedtuple("OmnibusSignificanceResult", [
-    "f_statistic", "anova_p_value", "anova_significant", "eta_squared",
-    "h_statistic", "kruskal_p_value", "kruskal_significant", "epsilon_squared"
-])
 
 
 class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
@@ -40,7 +30,10 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
     CONFIG_RESULTS_KEY = SupportedConfigAnalyzeStep.REPLACEMENT_MODEL
     TARGET_CONDITION = "memorized"
     SIGNIFICANCE_THRESHOLD = 0.05
-    EXCLUDE_METRICS = ["top_k_agreement", "replacement_prob_of_original_top"]
+    EXCLUDE_METRICS = [
+        ReplacementAccuracyMetrics.TOP_K_AGREEMENT.value,
+        ReplacementAccuracyMetrics.REPLACEMENT_PROB_OF_ORIGINAL_TOP.value
+    ]
 
     def __init__(self, save_path: Path | None = None):
         """
@@ -53,17 +46,28 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
 
     def run(self, config_results: dict[str, dict[SupportedConfigAnalyzeStep, Any]]) -> dict | None:
         """
-        Runs the analysis step, loading cached results if available.
+        Runs the analysis step, using passed-in results or loading cached results.
+
+        If config_results contains replacement model data, extracts it, saves to JSON,
+        and runs analysis. Otherwise, attempts to load from cached JSON file.
 
         Args:
             config_results: Dictionary mapping config names to their per-step results.
 
         Returns:
-            Dictionary of analysis results, or None if no cached results exist.
+            Dictionary of analysis results, or None if no results available.
         """
         if self.save_path is None:
             return None
 
+        # Check if results were passed in
+        results = self._extract_results(config_results)
+
+        if results:
+            self._save_results(config_results)
+            return self.analyze_results(results=results)
+
+        # Try to load from file
         output_path = self.save_path / "error_hypothesis_analysis.json"
         if output_path.exists() and (results := load_json(output_path)):
             for config, res in results.items():
@@ -73,6 +77,53 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
 
             return self.analyze_results(results=results)
         return None
+
+    def _extract_results(self, config_results: dict[str, dict[SupportedConfigAnalyzeStep, Any]]
+                         ) -> dict[str, dict[str, Any]] | None:
+        """
+        Extract replacement model results from config_results if present.
+
+        Args:
+            config_results: Dictionary mapping config names to their per-step results.
+
+        Returns:
+            Extracted results in format {config_name: {condition: metrics}}, or None.
+        """
+        results = {}
+        for config_name, step_results in config_results.items():
+            if self.CONFIG_RESULTS_KEY in step_results:
+                step_data = step_results[self.CONFIG_RESULTS_KEY]
+                if step_data:
+                    results[config_name] = step_data
+        return results if results else None
+
+    def _save_results(self, config_results: dict[str, dict[SupportedConfigAnalyzeStep, Any]]) -> None:
+        """
+        Save results to JSON file.
+
+        Converts enum keys to string values for JSON serialization.
+
+        Args:
+            config_results: Dictionary mapping config names to their per-step results.
+        """
+        self.save_path.mkdir(parents=True, exist_ok=True)
+        output_path = self.save_path / "error_hypothesis_analysis.json"
+
+        serializable_results = {}
+        for config_name, step_results in config_results.items():
+            if self.CONFIG_RESULTS_KEY not in step_results:
+                continue
+            condition_metrics = step_results[self.CONFIG_RESULTS_KEY]
+            serializable_results[config_name] = {
+                condition: {
+                    (k.value if hasattr(k, 'value') else k): v
+                    for k, v in metrics.items()
+                }
+                for condition, metrics in condition_metrics.items()
+            }
+
+        save_json(serializable_results, output_path)
+        print(f"Replacement model results saved to: {output_path}")
 
     def analyze_results(self, results: dict[str, dict[str, Any]],
                         target_condition: str | None = None) -> dict[str, dict]:
@@ -124,7 +175,7 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
 
         if not omnibus_df.empty:
             omnibus_df.to_csv(self.save_path / "omnibus_significance_analysis.csv", index=False)
-            all_results["omnibus"] = self.df_to_results_dict(omnibus_df, OmnibusSignificanceResult)
+            all_results["omnibus"] = self.df_to_results_dict(omnibus_df, OmnibusSignificanceMetrics)
             plot_omnibus_effect_sizes(
                 omnibus_df,
                 title="Omnibus Tests (ANOVA / Kruskal-Wallis)",
@@ -166,18 +217,19 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
         return comparison_df
 
     def df_to_results_dict(self, df: pd.DataFrame,
-                           result_type: type = SignificanceStats) -> dict[str, dict[str, Any]]:
+                           metrics_enum: type[Metrics] = SignificanceMetrics) -> dict[str, dict[str, Any]]:
         """
         Convert DataFrame rows to a dictionary keyed by metric name.
 
         Args:
             df: DataFrame with 'metric' column and result fields.
-            result_type: Named tuple type defining the fields to extract.
+            metrics_enum: Metrics enum class defining the fields to extract.
 
         Returns:
             Dictionary mapping metric names to their result dictionaries.
         """
-        return {row["metric"]: {name: row[name] for name in result_type._fields}
+        field_names = [m.value for m in metrics_enum]
+        return {row["metric"]: {name: row[name] for name in field_names}
                 for _, row in df.iterrows()}
 
     def compute_pairwise_significance(self, df: pd.DataFrame, target_condition: str,
@@ -221,7 +273,7 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
                         target_condition=target_condition,
                         other_condition=other_cond,
                         test_direction="target_worse" if test_target_worse else "target_better",
-                    ) | sig_stats._asdict())
+                    ) | sig_stats)
 
         results_df = self.apply_bh_correction(pd.DataFrame(result_rows))
         return results_df
@@ -250,10 +302,16 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
             groups = [self._get_metric_values_for_condition(df, metric, cond) for cond in conditions]
 
             # ANOVA (parametric) - tests if means differ
-            f_stat, anova_p = stats.f_oneway(*groups)
+            try:
+                f_stat, anova_p = stats.f_oneway(*groups)
+            except ValueError:
+                f_stat, anova_p = np.nan, np.nan
 
             # Kruskal-Wallis (non-parametric) - tests if distributions differ
-            h_stat, kruskal_p = stats.kruskal(*groups)
+            try:
+                h_stat, kruskal_p = stats.kruskal(*groups)
+            except ValueError:
+                h_stat, kruskal_p = np.nan, np.nan
 
             # Effect size: eta-squared for ANOVA
             all_values = np.concatenate(groups)
@@ -264,22 +322,21 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
 
             # Effect size: epsilon-squared for Kruskal-Wallis
             k, n = len(groups), len(all_values)
-            epsilon_squared = (h_stat - k + 1) / (n - k)
+            epsilon_squared = (h_stat - k + 1) / (n - k) if n > k else np.nan
 
-            results_rows.append(
-                dict(metric=metric.value,
-                     conditions=", ".join(conditions),
-                     n_groups=len(conditions)) |
-                OmnibusSignificanceResult(
-                    f_statistic=f_stat,
-                    anova_p_value=anova_p,
-                    anova_significant=self.is_significant(anova_p),
-                    eta_squared=eta_squared,
-                    h_statistic=h_stat,
-                    kruskal_p_value=kruskal_p,
-                    kruskal_significant=self.is_significant(kruskal_p),
-                    epsilon_squared=epsilon_squared,
-                )._asdict())
+            results_rows.append({
+                "metric": metric.value,
+                "conditions": ", ".join(conditions),
+                "n_groups": len(conditions),
+                OmnibusSignificanceMetrics.F_STATISTIC.value: f_stat,
+                OmnibusSignificanceMetrics.ANOVA_P_VALUE.value: anova_p,
+                OmnibusSignificanceMetrics.ANOVA_SIGNIFICANT.value: self.is_significant(anova_p),
+                OmnibusSignificanceMetrics.ETA_SQUARED.value: eta_squared,
+                OmnibusSignificanceMetrics.H_STATISTIC.value: h_stat,
+                OmnibusSignificanceMetrics.KRUSKAL_P_VALUE.value: kruskal_p,
+                OmnibusSignificanceMetrics.KRUSKAL_SIGNIFICANT.value: self.is_significant(kruskal_p),
+                OmnibusSignificanceMetrics.EPSILON_SQUARED.value: epsilon_squared,
+            })
 
         return pd.DataFrame(results_rows)
 
@@ -303,7 +360,7 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
         results_rows = []
 
         for metric in ComplexityMetrics:
-            df[metric.value] = df["original_top_token"].apply(
+            df[metric.value] = df[ReplacementAccuracyMetrics.ORIGINAL_TOP_TOKEN.value].apply(
                 lambda t: self.get_token_complexity(t)[metric]
             )
             mem_values = self._get_metric_values_for_condition(df, metric, target_condition)
@@ -316,7 +373,7 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
                 results_rows.append(dict(
                     metric=metric.value,
                     comparison=create_label_from_conditions(target_condition, other_cond),
-                ) | sig_stats._asdict())
+                ) | sig_stats)
 
         plot_token_complexity(df, self.save_path, [target_condition] + other_conditions)
 
@@ -324,7 +381,8 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
         complexity_dir = self.save_path / "token_complexity"
         complexity_dir.mkdir(parents=True, exist_ok=True)
 
-        complexity_df = df[["condition", "config", "original_top_token"] + [e.value for e in ComplexityMetrics]]
+        original_top_token_col = ReplacementAccuracyMetrics.ORIGINAL_TOP_TOKEN.value
+        complexity_df = df[["condition", "config", original_top_token_col] + [e.value for e in ComplexityMetrics]]
         complexity_df.to_csv(complexity_dir / "token_complexity.csv", index=False)
 
         results_df = self.apply_bh_correction(pd.DataFrame(results_rows))
@@ -333,7 +391,7 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
         return results_df
 
     def compute_significance_stats(self, group1: np.ndarray, group2: np.ndarray,
-                                   alternative: str = 'two-sided') -> SignificanceStats:
+                                   alternative: str = 'two-sided') -> dict[str, Any]:
         """
         Compute common significance test statistics between two groups.
 
@@ -343,7 +401,7 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
             alternative: Alternative hypothesis ('two-sided', 'less', 'greater').
 
         Returns:
-            SignificanceStats with all computed statistics.
+            Dictionary with SignificanceMetrics values as keys.
         """
         n1, n2 = len(group1), len(group2)
 
@@ -357,21 +415,21 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
         cohens_d = self.compute_cohens_d(group1, group2)
         rank_biserial = self.compute_rank_biserial(mw_stat, n1, n2)
 
-        return SignificanceStats(
-            group1_mean=group1.mean(),
-            group2_mean=group2.mean(),
-            group1_std=np.std(group1, ddof=1),
-            group2_std=np.std(group2, ddof=1),
-            n_per_group=n1,
-            t_statistic=t_stat,
-            t_p_value=t_p,
-            t_significant=t_p < 0.05,
-            mann_whitney_u=mw_stat,
-            mw_p_value=mw_p,
-            mw_significant=mw_p < 0.05,
-            cohens_d=cohens_d,
-            rank_biserial_r=rank_biserial,
-        )
+        return {
+            SignificanceMetrics.GROUP1_MEAN.value: group1.mean(),
+            SignificanceMetrics.GROUP2_MEAN.value: group2.mean(),
+            SignificanceMetrics.GROUP1_STD.value: np.std(group1, ddof=1),
+            SignificanceMetrics.GROUP2_STD.value: np.std(group2, ddof=1),
+            SignificanceMetrics.N_PER_GROUP.value: n1,
+            SignificanceMetrics.T_STATISTIC.value: t_stat,
+            SignificanceMetrics.T_P_VALUE.value: t_p,
+            SignificanceMetrics.T_SIGNIFICANT.value: self.is_significant(t_p),
+            SignificanceMetrics.MANN_WHITNEY_U.value: mw_stat,
+            SignificanceMetrics.MW_P_VALUE.value: mw_p,
+            SignificanceMetrics.MW_SIGNIFICANT.value: self.is_significant(mw_p),
+            SignificanceMetrics.COHENS_D.value: cohens_d,
+            SignificanceMetrics.RANK_BISERIAL_R.value: rank_biserial,
+        }
 
     @staticmethod
     def get_token_complexity(token: str) -> dict[ComplexityMetrics, float]:
@@ -409,7 +467,12 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
         for metric_name in results_df.columns:
             if metric_name.endswith("p_value"):
                 p_values = results_df[metric_name].values
-                adjusted = stats.false_discovery_control(p_values, method='bh')
+                valid_mask = ~np.isnan(p_values)
+                adjusted = np.full_like(p_values, np.nan, dtype=float)
+
+                if valid_mask.any():
+                    adjusted[valid_mask] = stats.false_discovery_control(p_values[valid_mask], method='bh')
+
                 column_name = f"{metric_name}_bh"
                 results_df[column_name] = adjusted
                 sign_col_name = column_name.replace("p_value", "significant")
@@ -510,9 +573,14 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
         rows = []
         for config_name, condition_metrics in results.items():
             for condition, metrics in condition_metrics.items():
+                # Convert enum keys to string values
+                metrics_with_str_keys = {
+                    (k.value if hasattr(k, 'value') else k): v
+                    for k, v in metrics.items()
+                }
                 rows.append({
                     "condition": condition,
                     "config": config_name,
-                    **metrics
+                    **metrics_with_str_keys
                 })
         return pd.DataFrame(rows)

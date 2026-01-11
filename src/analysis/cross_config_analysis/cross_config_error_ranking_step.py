@@ -1,4 +1,3 @@
-from collections import namedtuple
 from pathlib import Path
 from typing import Dict, List, Any, Tuple, Callable
 
@@ -9,22 +8,9 @@ from scipy.stats import wilcoxon, ttest_rel
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
 from src.analysis.config_analysis.config_error_ranking_step import ErrorRankingMetrics, ConfigErrorRankingStep
 from src.analysis.cross_config_analysis.cross_config_analyze_step import CrossConfigAnalyzeStep
+from src.metrics import PooledStatsMetrics, ConditionStatsMetrics, RawScoreMetrics
 from src.utils import append_to_dict_list, get_conditions_from_label, create_label_from_conditions
 from src.visualizations import boxplot_metric_family, plot_delta_distribution
-
-PooledStatsResult = namedtuple("PooledStatsResult", [
-    "mean", "median", "wilcoxon_stat_onesided", "wilcoxon_p_onesided",
-    "count_base_gt_other", "count_base_lt_other", "count_equal", "n_samples"
-])
-
-ConditionStatsResult = namedtuple("ConditionStatsResult", [
-    "mean", "median", "wilcoxon_stat", "wilcoxon_p",
-    "ttest_stat", "ttest_p", "count_g1_gt_g2", "count_g1_lt_g2", "count_equal"
-])
-
-RawScoreRow = namedtuple("RawScoreRow", [
-    "metric", "sample", "g1_score", "g2_score", "delta"
-])
 
 
 class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
@@ -133,13 +119,13 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
             d_list = deltas[metric] if k is None else deltas[metric][k]
             for i, (g1, g2, d) in enumerate(zip(g1_list, g2_list, d_list)):
                 sample_id = i if not sample_ids else sample_ids[i]
-                rows.append(RawScoreRow(
-                    metric=metric.value if k is None else f"{metric.value}@{k}",  # Use .value for CSV
-                    sample=sample_id,
-                    g1_score=g1,
-                    g2_score=g2,
-                    delta=d
-                )._asdict())
+                rows.append({
+                    RawScoreMetrics.METRIC.value: metric.value if k is None else f"{metric.value}@{k}",
+                    RawScoreMetrics.SAMPLE.value: sample_id,
+                    RawScoreMetrics.G1_SCORE.value: g1,
+                    RawScoreMetrics.G2_SCORE.value: g2,
+                    RawScoreMetrics.DELTA.value: d,
+                })
             return None
 
         self._process_metrics(g1_values, add_scores_to_row)
@@ -193,16 +179,16 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
             except ValueError:
                 wilcoxon_stat, wilcoxon_p = np.nan, np.nan
 
-            return PooledStatsResult(
-                mean=float(vals.mean()),
-                median=float(np.median(vals)),
-                wilcoxon_stat_onesided=wilcoxon_stat,
-                wilcoxon_p_onesided=wilcoxon_p,
-                count_base_gt_other=int(np.sum(vals > 0)),
-                count_base_lt_other=int(np.sum(vals < 0)),
-                count_equal=int(np.sum(vals == 0)),
-                n_samples=len(vals),
-            )._asdict()
+            return {
+                PooledStatsMetrics.MEAN.value: float(vals.mean()),
+                PooledStatsMetrics.MEDIAN.value: float(np.median(vals)),
+                PooledStatsMetrics.WILCOXON_STAT_ONESIDED.value: wilcoxon_stat,
+                PooledStatsMetrics.WILCOXON_P_ONESIDED.value: wilcoxon_p,
+                PooledStatsMetrics.COUNT_BASE_GT_OTHER.value: int(np.sum(vals > 0)),
+                PooledStatsMetrics.COUNT_BASE_LT_OTHER.value: int(np.sum(vals < 0)),
+                PooledStatsMetrics.COUNT_EQUAL.value: int(np.sum(vals == 0)),
+                PooledStatsMetrics.N_SAMPLES.value: len(vals),
+            }
 
         stats = self._process_metrics(pooled_deltas, compute_stats)
         return stats, pooled_deltas
@@ -275,17 +261,17 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
             w = wilcoxon(vals)
             t = ttest_rel(vals, np.zeros_like(vals))
 
-            return ConditionStatsResult(
-                mean=float(vals.mean()),
-                median=float(np.median(vals)),
-                wilcoxon_stat=float(w.statistic),
-                wilcoxon_p=float(w.pvalue),
-                ttest_stat=float(t.statistic),
-                ttest_p=float(t.pvalue),
-                count_g1_gt_g2=int(np.sum(vals > 0)),
-                count_g1_lt_g2=int(np.sum(vals < 0)),
-                count_equal=int(np.sum(vals == 0)),
-            )._asdict()
+            return {
+                ConditionStatsMetrics.MEAN.value: float(vals.mean()),
+                ConditionStatsMetrics.MEDIAN.value: float(np.median(vals)),
+                ConditionStatsMetrics.WILCOXON_STAT.value: float(w.statistic),
+                ConditionStatsMetrics.WILCOXON_P.value: float(w.pvalue),
+                ConditionStatsMetrics.TTEST_STAT.value: float(t.statistic),
+                ConditionStatsMetrics.TTEST_P.value: float(t.pvalue),
+                ConditionStatsMetrics.COUNT_G1_GT_G2.value: int(np.sum(vals > 0)),
+                ConditionStatsMetrics.COUNT_G1_LT_G2.value: int(np.sum(vals < 0)),
+                ConditionStatsMetrics.COUNT_EQUAL.value: int(np.sum(vals == 0)),
+            }
 
         return self._process_metrics(deltas, compute_stats)
 

@@ -5,5 +5,10 @@
   ],
   "SIM_PROMPTS": [
     "you little bitch? I'll have you know I"
-  ]
+  ],
+  "PROMPT_IDS": {
+    "main": ["full"],
+    "diff": ["subset-fail"],
+    "sim": ["subset-success"]
+  }
 }

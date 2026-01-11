@@ -65,6 +65,28 @@ def get_env_list(name: str, default: List[str] = None) -> List[str]:
     return [item.strip() for item in value.split(",")]
 
 
+def get_env_grouped_list(name: str, default: List[List[str]] = None) -> List[List[str]]:
+    """
+    Get groups of strings from a semicolon-and-comma-separated environment variable.
+
+    Format: "a,b,c;d,e;f" -> [["a", "b", "c"], ["d", "e"], ["f"]]
+
+    Args:
+        name: The name of the environment variable.
+        default: The default value if the environment variable is not set.
+
+    Returns:
+        List of lists of strings from the environment variable.
+    """
+    if default is None:
+        default = []
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    groups = value.split(";")
+    return [[item.strip() for item in group.split(",") if item.strip()] for group in groups if group.strip()]
+
+
 def get_env_int_list(name: str, default: List[int] = None) -> List[int]:
     """
     Get a list of integers from a comma-separated environment variable.
