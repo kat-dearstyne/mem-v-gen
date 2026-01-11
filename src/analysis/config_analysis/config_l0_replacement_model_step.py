@@ -39,7 +39,7 @@ class ConfigL0ReplacementModelStep(ConfigAnalyzeStep):
             Dictionary mapping prompt IDs to L0 per layer tensors.
         """
         results = {}
-        for prompt_id, prompt in self.graph_analyzer.prompts.values():
+        for prompt_id, prompt in self.graph_analyzer.prompts.items():
             l0_per_layer = self.compute_l0_for_prompt(prompt)
             results[prompt_id] = l0_per_layer
         return results
