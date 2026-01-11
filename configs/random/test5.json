@@ -1,8 +1,0 @@
-{
-  "MAIN_PROMPT": "A bustling street market filled the air with chatter as vendors arranged spices, textiles, and fruits in vibrant displays.",
-  "DIFF_PROMPTS": [
-    "A remote desert observatory tracked faint star patterns while its instruments recorded delicate fluctuations in cosmic dust."
-  ],
-  "SIM_PROMPTS": [
-  ]
-}
