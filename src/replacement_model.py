@@ -17,7 +17,7 @@ class ReplacementModelManager:
     DEFAULT_BASE_MODEL = "google/gemma-2-2b"
     DEFAULT_N_LAYERS = 26
     DEFAULT_SUB_MODELS = {
-        SubModelType.PLT: "google/gemma-scope-2b-pt-transcoders",
+        SubModelType.PLT: "mntss/gemma-scope-transcoders",
         SubModelType.CLT:  "mntss/clt-gemma-2-2b-426k"
     }
     def __init__(self, base_model: str = DEFAULT_BASE_MODEL, sub_model: str | int = SubModelType.CLT):
