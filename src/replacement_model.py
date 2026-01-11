@@ -65,6 +65,17 @@ class ReplacementModelManager:
             self.sub_model,
             dtype=torch.bfloat16,
         )
+        print(list(model.hook_dict.keys()))
+
+        # Option 2: Print mod_dict keys (what the error is checking against)
+        print(list(model.mod_dict.keys()))
+
+        # Option 3: Filter for just block hooks
+        print([k for k in model.hook_dict.keys() if 'blocks.0' in k])
+
+        # Also print what the transcoders think the hooks should be
+        print(f"feature_input_hook: {model.transcoders.feature_input_hook}")
+        print(f"feature_output_hook: {model.transcoders.feature_output_hook}")
         return model
 
     def encode_features(self, prompt_tokens: Tensor) -> Tensor:
