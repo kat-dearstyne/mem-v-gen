@@ -67,6 +67,33 @@ class ReplacementModelManager:
         )
         return model
 
+    @staticmethod
+    def _get_hook_name(model, hook_attr: str, layer: int) -> str:
+        """
+        Get the full hook name for a given layer.
+
+        Extracts the activation name from the model's hook attribute and
+        constructs the full hook name using transformer_lens utilities.
+
+        Args:
+            model: The ReplacementModel instance.
+            hook_attr: Name of the hook attribute (e.g., 'feature_input_hook').
+            layer: Layer index.
+
+        Returns:
+            Full hook name string (e.g., 'blocks.0.mlp.hook_post').
+        """
+        hook_point = getattr(model, hook_attr)
+        # Extract activation name - format is "hook_<name>" or "blocks.X.hook_<name>"
+        # We need just the "<name>" part for get_act_name
+        if "hook_" in hook_point:
+            # Find the last occurrence of "hook_" and take everything after it
+            idx = hook_point.rfind("hook_")
+            act_name = hook_point[idx + 5:]  # Skip "hook_"
+        else:
+            act_name = hook_point
+        return tl.utils.get_act_name(act_name, layer)
+
     def encode_features(self, prompt_tokens: Tensor) -> Tensor:
         """
         Encode activations through transcoders for all layers.
@@ -91,7 +118,8 @@ class ReplacementModelManager:
         all_hooks = []
         for layer in range(model.cfg.n_layers):
             input_hook_fn_partial = partial(input_hook_fn, layer=layer)
-            all_hooks.append((tl.utils.get_act_name(model.feature_input_hook[5:], layer), input_hook_fn_partial))
+            hook_name = self._get_hook_name(model, 'feature_input_hook', layer)
+            all_hooks.append((hook_name, input_hook_fn_partial))
 
         with torch.no_grad():
             model.run_with_hooks(prompt_tokens, fwd_hooks=all_hooks)
@@ -131,10 +159,12 @@ class ReplacementModelManager:
         all_hooks = []
         for layer in range(model.cfg.n_layers):
             input_hook_fn_partial = partial(input_hook_fn, layer=layer)
-            all_hooks.append((tl.utils.get_act_name(model.feature_input_hook[5:], layer), input_hook_fn_partial))
+            input_hook_name = self._get_hook_name(model, 'feature_input_hook', layer)
+            all_hooks.append((input_hook_name, input_hook_fn_partial))
 
             output_hook_fn_partial = partial(output_hook_fn, layer=layer)
-            all_hooks.append((tl.utils.get_act_name(model.feature_output_hook[5:], layer), output_hook_fn_partial))
+            output_hook_name = self._get_hook_name(model, 'feature_output_hook', layer)
+            all_hooks.append((output_hook_name, output_hook_fn_partial))
 
         with torch.no_grad():
             logits = model.run_with_hooks(prompt_tokens, fwd_hooks=all_hooks, return_type='logits')
