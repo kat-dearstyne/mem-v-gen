@@ -52,6 +52,7 @@ class ConfigAnalyzer:
         for step_type in analyze_steps:
             step_cls: Type[ConfigAnalyzeStep] | None = STEP2CLASS.get(step_type)
             assert step_cls is not None, f"UNKNOWN STEP: {step_type.name}"
+            print(f"Starting step {step_cls.__name__}")
             step: ConfigAnalyzeStep = step_cls(graph_analyzer=self.graph_analyzer, **step_params)
             results[step_type] = step.run()
         return results

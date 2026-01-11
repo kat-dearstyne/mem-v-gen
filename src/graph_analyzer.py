@@ -31,28 +31,42 @@ class GraphAnalyzer:
         """
         self.prompts = prompts
         self.neuronpedia_manager = neuronpedia_manager
-        self.graphs, self.dfs = self.load_graphs_and_dfs()
+        self.graphs: Dict[str, GraphManager] = {}
+        self.dfs: Dict[str, pd.DataFrame] = {}
 
-    def load_graphs_and_dfs(self) -> Tuple[Dict[str, GraphManager], Dict[str, pd.DataFrame]]:
+    def _load_graph_and_df(self, prompt_id: str) -> Tuple[GraphManager, pd.DataFrame]:
         """
-        Loads all graphs and creates node dataframes once for reuse across methods.
+        Load a single graph and its dataframe.
+
+        Args:
+            prompt_id: The prompt identifier to load.
 
         Returns:
-            Tuple of (graphs dict, dataframes dict) keyed by prompt ID.
+            Tuple of (GraphManager, DataFrame) for the prompt.
         """
-        graphs = {}
-        dfs = {}
-        for p_id, prompt in self.prompts.items():
-            graph = self.neuronpedia_manager.create_or_load_graph(prompt=prompt)
-            df = graph.create_node_df(exclude_embeddings=True, exclude_errors=True, exclude_logits=True,
-                                      drop_duplicates=True)
-            graphs[p_id] = graph
-            dfs[p_id] = df
-        return graphs, dfs
+        prompt = self.prompts[prompt_id]
+        graph = self.neuronpedia_manager.create_or_load_graph(prompt=prompt)
+        df = graph.create_node_df(
+            exclude_embeddings=True,
+            exclude_errors=True,
+            exclude_logits=True,
+            drop_duplicates=True
+        )
+        self.graphs[prompt_id] = graph
+        self.dfs[prompt_id] = df
+        return graph, df
+
+    def load_all_graphs(self) -> None:
+        """
+        Pre-load all graphs and dataframes. Useful when you know you'll need all of them.
+        """
+        for prompt_id in self.prompts:
+            if prompt_id not in self.graphs:
+                self._load_graph_and_df(prompt_id)
 
     def get_graph_and_df(self, prompt_id: str) -> Tuple[GraphManager, pd.DataFrame]:
         """
-        Retrieve the graph and node dataframe for a given prompt.
+        Retrieve the graph and node dataframe for a given prompt, loading lazily if needed.
 
         Args:
             prompt_id: The prompt identifier.
@@ -61,6 +75,8 @@ class GraphAnalyzer:
             Tuple of (GraphManager, DataFrame) for the prompt.
         """
         assert prompt_id in self.prompts, f"Unknown prompt: {prompt_id}"
+        if prompt_id not in self.graphs:
+            self._load_graph_and_df(prompt_id)
         return self.graphs[prompt_id], self.dfs[prompt_id]
 
     def _compare_nodes(
