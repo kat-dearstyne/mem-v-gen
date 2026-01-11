@@ -67,33 +67,6 @@ class ReplacementModelManager:
         )
         return model
 
-    @staticmethod
-    def _get_hook_name(model, hook_attr: str, layer: int) -> str:
-        """
-        Get the full hook name for a given layer.
-
-        Extracts the activation name from the model's hook attribute and
-        constructs the full hook name using transformer_lens utilities.
-
-        Args:
-            model: The ReplacementModel instance.
-            hook_attr: Name of the hook attribute (e.g., 'feature_input_hook').
-            layer: Layer index.
-
-        Returns:
-            Full hook name string (e.g., 'blocks.0.mlp.hook_post').
-        """
-        hook_point = getattr(model, hook_attr)
-        # Extract activation name - format is "hook_<name>" or "blocks.X.hook_<name>"
-        # We need just the "<name>" part for get_act_name
-        if "hook_" in hook_point:
-            # Find the last occurrence of "hook_" and take everything after it
-            idx = hook_point.rfind("hook_")
-            act_name = hook_point[idx + 5:]  # Skip "hook_"
-        else:
-            act_name = hook_point
-        return tl.utils.get_act_name(act_name, layer)
-
     def encode_features(self, prompt_tokens: Tensor) -> Tensor:
         """
         Encode activations through transcoders for all layers.
@@ -169,3 +142,20 @@ class ReplacementModelManager:
         with torch.no_grad():
             logits = model.run_with_hooks(prompt_tokens, fwd_hooks=all_hooks, return_type='logits')
         return logits
+
+    @staticmethod
+    def _get_hook_name(model, hook_attr: str, layer: int) -> str:
+        """
+        Get the full hook name for a given layer.
+
+        Args:
+            model: The ReplacementModel instance.
+            hook_attr: Name of the hook attribute (e.g., 'feature_input_hook').
+            layer: Layer index.
+
+        Returns:
+            Full hook name string (e.g., 'blocks.0.hook_resid_mid').
+        """
+        # Get hook name from transcoders (e.g., "hook_resid_mid" or "hook_mlp_out")
+        hook_point = getattr(model.transcoders, hook_attr)
+        return f"blocks.{layer}.{hook_point}"
