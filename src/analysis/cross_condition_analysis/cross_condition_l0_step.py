@@ -5,7 +5,7 @@ import pandas as pd
 
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
 from src.analysis.cross_condition_analysis.cross_condition_analyze_step import CrossConditionAnalyzeStep
-from src.visualizations import plot_l0_per_layer_by_condition
+from src.visualizations import plot_l0_per_layer_by_condition, plot_l0_per_layer_line
 
 L0_COMPARISON_FILENAME = "l0_comparison.csv"
 
@@ -47,6 +47,13 @@ class CrossConditionL0Step(CrossConditionAnalyzeStep):
                 condition_order=condition_order,
                 condition_col=self.CONDITION_COL,
                 save_path=self.save_path / "l0_per_layer_by_condition.png"
+            )
+
+            plot_l0_per_layer_line(
+                combined_df,
+                condition_order=condition_order,
+                condition_col=self.CONDITION_COL,
+                save_path=self.save_path / "l0_per_layer_line.png"
             )
 
             print(f"Saved L0 cross-condition results to: {self.save_path}")

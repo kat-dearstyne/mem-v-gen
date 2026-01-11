@@ -60,6 +60,7 @@ class ReplacementModelManager:
 
         if hf_token:
             login(hf_token)
+        print(f"Loading submodel: {self.sub_model}")
         model = ReplacementModel.from_pretrained(
             self.base_model,
             self.sub_model,

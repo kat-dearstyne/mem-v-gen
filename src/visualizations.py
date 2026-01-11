@@ -2109,3 +2109,50 @@ def plot_l0_per_layer_by_condition(df: pd.DataFrame,
         plt.close()
     else:
         plt.show()
+
+
+def plot_l0_per_layer_line(df: pd.DataFrame,
+                           condition_order: List[str],
+                           condition_col: str = "condition",
+                           layer_col: str = "layer",
+                           l0_col: str = "l0_value",
+                           save_path: Optional[Path] = None) -> None:
+    """
+    Creates a line plot showing mean L0 per layer with all conditions overlaid.
+
+    Args:
+        df: DataFrame with layer, l0_value, and condition columns.
+        condition_order: Order of conditions for legend.
+        condition_col: Column name for condition.
+        layer_col: Column name for layer.
+        l0_col: Column name for L0 values.
+        save_path: Optional path to save the figure.
+    """
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    for i, condition in enumerate(condition_order):
+        cond_df = df[df[condition_col] == condition]
+        stats = cond_df.groupby(layer_col)[l0_col].agg(['mean', 'std']).reset_index()
+        layers = stats[layer_col].values
+        means = stats['mean'].values
+        stds = stats['std'].values
+
+        color = CUSTOM_PALETTE[i % len(CUSTOM_PALETTE)]
+
+        ax.plot(layers, means, marker='o', markersize=4, linewidth=2,
+                color=color, label=condition)
+        ax.fill_between(layers, means - stds, means + stds, color=color, alpha=0.2)
+
+    ax.set_xlabel("Layer", labelpad=10)
+    ax.set_ylabel("L0 (Active Features)", labelpad=10)
+    ax.set_title("L0 Per Layer by Condition", fontsize=14, fontweight='bold')
+    ax.legend(title="Condition", loc='best')
+    sns.despine(ax=ax)
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close()
+    else:
+        plt.show()
