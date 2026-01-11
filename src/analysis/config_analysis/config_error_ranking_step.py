@@ -65,13 +65,13 @@ class ConfigErrorRankingStep(ConfigAnalyzeStep):
         if not self.metrics2run:
             return results
         comparison_ids = self.comparison_prompt_ids or [
-            p_id for p_id in self.graph_analyzer.graphs.keys()
+            p_id for p_id in self.graph_analyzer.prompts.keys()
             if p_id != self.main_prompt_id
         ]
 
-        main_graph = self.graph_analyzer.graphs[self.main_prompt_id]
+        main_graph, _ = self.graph_analyzer.get_graph_and_df(self.main_prompt_id)
         for comp_id in comparison_ids:
-            comp_graph = self.graph_analyzer.graphs[comp_id]
+            comp_graph, _ = self.graph_analyzer.get_graph_and_df(comp_id)
             label = create_label_from_conditions(self.main_prompt_id, comp_id)
             results[label] = self._run_error_ranking([main_graph, comp_graph], self.use_same_token)
 

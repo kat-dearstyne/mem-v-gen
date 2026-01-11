@@ -354,7 +354,7 @@ class GraphAnalyzer:
         num_graphs = len(prompt_ids)
 
         for graph_idx, prompt_id in enumerate(prompt_ids):
-            graph = self.graphs[prompt_id]
+            graph, _ = self.get_graph_and_df(prompt_id)
             starting_node = starting_nodes[graph_idx] if starting_nodes else None
             links = graph.get_links_from_node(starting_node=starting_node, include_features_only=True)
             for link in links:
@@ -521,7 +521,7 @@ class GraphAnalyzer:
         thresholds = self.DEFAULT_THRESHOLDS if not thresholds else thresholds
         prompt_ids = list(self.prompts.keys()) if prompt_ids is None else prompt_ids
         num_prompts = len(prompt_ids)
-        all_dfs = [self.dfs[p_id] for p_id in prompt_ids]
+        all_dfs = [self.get_graph_and_df(p_id)[1] for p_id in prompt_ids]
         metric_results = {SharedFeatureMetrics.NUM_PROMPTS: num_prompts,
                           SharedFeatureMetrics.AVG_FEATURES_PER_PROMPT: sum(len(df) for df in all_dfs) / num_prompts}
 
