@@ -75,7 +75,8 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
         """
 
         results = {}
-        for prompt_id, graph in self.graph_analyzer.graphs.items():
+        for prompt_id in self.graph_analyzer.prompts:
+            graph, _ = self.graph_analyzer.get_graph_and_df(prompt_id)
             metrics = self.run_accuracy_test(graph.prompt)
             results[prompt_id] = metrics
 

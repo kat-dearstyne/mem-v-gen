@@ -587,7 +587,7 @@ class GraphAnalyzer:
             DataFrame of features meeting the frequency threshold, with ctx_freq column.
         """
         # Combine all dfs (each already de-duplicated per prompt)
-        all_dfs = list(self.dfs.values())
+        all_dfs = [self.get_graph_and_df(p_id)[1] for p_id in self.prompts]
         combined_df = pd.concat(all_dfs, ignore_index=True)
 
         # Get frequencies - counts how many prompts have each feature
