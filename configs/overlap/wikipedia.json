@@ -1,8 +1,0 @@
-{
-  "MAIN_PROMPT": "The Free Encyclopedia that Anyone Can",
-  "DIFF_PROMPTS": [
-    "The Free Encyclopedia that Anyone"
-  ],
-  "SIM_PROMPTS": [],
-  "TASK": "combined"
-}

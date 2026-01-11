@@ -1,9 +1,0 @@
-{
-  "MAIN_PROMPT": "Lorem Ipsum is simply dummy text of the",
-  "DIFF_PROMPTS": [
-    "Lorem Ipsum is simply dummy",
-    "Lorem Ipsum is simply"
-  ],
-  "SIM_PROMPTS": [],
-  "TASK": "combined"
-}

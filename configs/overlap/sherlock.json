@@ -1,9 +1,0 @@
-{
-  "MAIN_PROMPT": "When you have eliminated the impossible, whatever remains, however improbable, must be the",
-  "DIFF_PROMPTS": [
-    "When you have eliminated the impossible, whatever remains, however",
-    "When you have eliminated the impossible, whatever"
-  ],
-  "SIM_PROMPTS": [],
-  "TASK": "combined"
-}

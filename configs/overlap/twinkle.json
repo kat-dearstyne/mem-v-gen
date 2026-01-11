@@ -1,9 +1,0 @@
-{
-  "MAIN_PROMPT": "Twinkle twinkle little star\nHow I wonder what you",
-  "DIFF_PROMPTS": [
-    "Twinkle twinkle little star\nHow I",
-    "Twinkle twinkle little"
-  ],
-  "SIM_PROMPTS": [],
-  "TASK": "combined"
-}

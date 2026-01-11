@@ -1,9 +1,0 @@
-{
-  "MAIN_PROMPT": "Once upon a midnight dreary, while I pondered, weak and",
-  "DIFF_PROMPTS": [
-    "Once upon a midnight dreary, while I",
-    "Once upon a midnight"
-  ],
-  "SIM_PROMPTS": [],
-  "TASK": "combined"
-}
