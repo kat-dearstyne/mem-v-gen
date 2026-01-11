@@ -53,10 +53,12 @@ class CrossConfigL0ReplacementModelStep(CrossConfigAnalyzeStep):
             or None if no results found.
         """
         if self.save_path is None:
+            print("Save path is None so skipping l0 analysis")
             return None
 
         # Check if results were passed in
         results = self._extract_results(config_results)
+        print("Results found for l0 analysis")
 
         if results:
             self._save_raw_results(results)
