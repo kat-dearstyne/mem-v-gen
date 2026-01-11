@@ -260,6 +260,7 @@ def run_for_config(config_dir: Path, config_name: str,
     else:
         raise NotImplementedError(f"Unknown task: {config.task}")
 
+    print(f"Finished with results of length {len(results)}")
     return results
 
 
@@ -321,6 +322,7 @@ def run_for_all_configs(config_names: List[str] = None, config_dir: str = None,
         )
         all_config_results[config] = config_results
 
+    print(f"Finished running all {len(config_names)} configs.")
     if save_path is None:
         save_path = get_results_base_dir()
 
