@@ -5,6 +5,9 @@ import pandas as pd
 
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
 from src.analysis.cross_condition_analysis.cross_condition_analyze_step import CrossConditionAnalyzeStep
+from src.analysis.cross_config_analysis.cross_config_l0_replacement_model_step import (
+    L0_VALUE_COL, L0_NORMALIZED_COL
+)
 from src.visualizations import plot_l0_per_layer_by_condition, plot_l0_per_layer_line
 
 L0_COMPARISON_FILENAME = "l0_comparison.csv"
@@ -42,10 +45,12 @@ class CrossConditionL0Step(CrossConditionAnalyzeStep):
             self.save_path.mkdir(parents=True, exist_ok=True)
             combined_df.to_csv(self.save_path / L0_COMPARISON_FILENAME, index=False)
 
+            # Raw L0 plots
             plot_l0_per_layer_by_condition(
                 combined_df,
                 condition_order=condition_order,
                 condition_col=self.CONDITION_COL,
+                l0_col=L0_VALUE_COL,
                 save_path=self.save_path / "l0_per_layer_by_condition.png"
             )
 
@@ -53,8 +58,27 @@ class CrossConditionL0Step(CrossConditionAnalyzeStep):
                 combined_df,
                 condition_order=condition_order,
                 condition_col=self.CONDITION_COL,
+                l0_col=L0_VALUE_COL,
                 save_path=self.save_path / "l0_per_layer_line.png"
             )
+
+            # Normalized L0 plots (if available)
+            if L0_NORMALIZED_COL in combined_df.columns and combined_df[L0_NORMALIZED_COL].notna().any():
+                plot_l0_per_layer_by_condition(
+                    combined_df,
+                    condition_order=condition_order,
+                    condition_col=self.CONDITION_COL,
+                    l0_col=L0_NORMALIZED_COL,
+                    save_path=self.save_path / "l0_normalized_per_layer_by_condition.png"
+                )
+
+                plot_l0_per_layer_line(
+                    combined_df,
+                    condition_order=condition_order,
+                    condition_col=self.CONDITION_COL,
+                    l0_col=L0_NORMALIZED_COL,
+                    save_path=self.save_path / "l0_normalized_per_layer_line.png"
+                )
 
             print(f"Saved L0 cross-condition results to: {self.save_path}")
 

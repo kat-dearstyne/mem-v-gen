@@ -155,6 +155,16 @@ class ReplacementModelManager:
             logits = model.run_with_hooks(prompt_tokens, fwd_hooks=all_hooks, return_type='logits')
         return logits
 
+    def get_d_transcoder(self) -> int:
+        """
+        Get the number of features in the transcoder.
+
+        Returns:
+            Number of transcoder features (d_transcoder).
+        """
+        model = self.get_model()
+        return model.transcoders.d_transcoder
+
     @staticmethod
     def _get_hook_name(model, hook_attr: str, layer: int) -> str:
         """

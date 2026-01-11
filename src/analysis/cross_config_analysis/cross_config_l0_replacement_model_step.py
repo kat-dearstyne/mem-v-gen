@@ -11,6 +11,8 @@ from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import
 from src.utils import save_json, load_json
 
 L0_VALUE_COL = "l0_value"
+L0_NORMALIZED_COL = "l0_normalized"
+D_TRANSCODER_COL = "d_transcoder"
 LAYER_COL = "layer"
 PROMPT_ID_COL = "prompt_id"
 
@@ -86,14 +88,19 @@ class CrossConfigL0ReplacementModelStep(CrossConfigAnalyzeStep):
             config_results: Dictionary mapping config names to their per-step results.
 
         Returns:
-            Extracted results in format {config_name: {prompt_id: l0_values}}, or None.
+            Extracted results in format {config_name: {"results": {...}, "d_transcoder": int}}, or None.
         """
         results = {}
         for config_name, step_results in config_results.items():
             if self.CONFIG_RESULTS_KEY in step_results:
                 step_data = step_results[self.CONFIG_RESULTS_KEY]
                 if step_data:
-                    results[config_name] = step_data
+                    # Handle both old format (direct dict) and new format (with d_transcoder)
+                    if isinstance(step_data, dict) and "results" in step_data:
+                        results[config_name] = step_data
+                    else:
+                        # Legacy format - wrap in expected structure
+                        results[config_name] = {"results": step_data, "d_transcoder": None}
         return results if results else None
 
     def _save_raw_results(self, results: dict[str, dict[str, Any]]) -> None:
@@ -103,22 +110,30 @@ class CrossConfigL0ReplacementModelStep(CrossConfigAnalyzeStep):
         Converts tensors to lists for JSON serialization.
 
         Args:
-            results: Dictionary mapping config names to prompt L0 results.
+            results: Dictionary mapping config names to {"results": {...}, "d_transcoder": int}.
         """
         self.save_path.mkdir(parents=True, exist_ok=True)
         output_path = self.save_path / self.L0_RAW_FILENAME
 
         serializable_results = {}
-        for config_name, prompt_results in results.items():
-            serializable_results[config_name] = {}
+        for config_name, config_data in results.items():
+            prompt_results = config_data.get("results", config_data)
+            d_transcoder = config_data.get("d_transcoder")
+
+            serializable_results[config_name] = {
+                "results": {},
+                "d_transcoder": d_transcoder
+            }
             for prompt_id, l0_tensor in prompt_results.items():
+                if prompt_id in ("results", "d_transcoder"):
+                    continue
                 if isinstance(l0_tensor, torch.Tensor):
                     l0_values = l0_tensor.cpu().tolist()
                 elif isinstance(l0_tensor, np.ndarray):
                     l0_values = l0_tensor.tolist()
                 else:
                     l0_values = list(l0_tensor)
-                serializable_results[config_name][prompt_id] = l0_values
+                serializable_results[config_name]["results"][prompt_id] = l0_values
 
         save_json(serializable_results, output_path)
         print(f"L0 raw results saved to: {output_path}")
@@ -128,27 +143,39 @@ class CrossConfigL0ReplacementModelStep(CrossConfigAnalyzeStep):
         Aggregate L0 results into DataFrame and compute statistics.
 
         Args:
-            results: Dictionary mapping config names to prompt L0 results.
+            results: Dictionary mapping config names to {"results": {...}, "d_transcoder": int}.
 
         Returns:
             Dictionary with 'df' (raw data) and 'stats' (summary statistics).
         """
         rows = []
 
-        for config_name, prompt_results in results.items():
+        for config_name, config_data in results.items():
+            prompt_results = config_data.get("results", config_data)
+            d_transcoder = config_data.get("d_transcoder")
+
             for prompt_id, l0_tensor in prompt_results.items():
+                if prompt_id in ("results", "d_transcoder"):
+                    continue
                 if isinstance(l0_tensor, torch.Tensor):
                     l0_values = l0_tensor.cpu().numpy()
                 else:
                     l0_values = np.array(l0_tensor)
 
                 for layer, l0_value in enumerate(l0_values):
-                    rows.append({
+                    row = {
                         CONFIG_NAME_COL: config_name,
                         PROMPT_ID_COL: prompt_id,
                         LAYER_COL: layer,
                         L0_VALUE_COL: float(l0_value),
-                    })
+                        D_TRANSCODER_COL: d_transcoder,
+                    }
+                    # Compute normalized L0 if d_transcoder is available
+                    if d_transcoder:
+                        row[L0_NORMALIZED_COL] = float(l0_value) / d_transcoder
+                    else:
+                        row[L0_NORMALIZED_COL] = None
+                    rows.append(row)
 
         df = pd.DataFrame(rows)
         stats_df = self._compute_layer_stats(df)

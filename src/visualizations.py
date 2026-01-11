@@ -2060,6 +2060,10 @@ def plot_l0_per_layer_by_condition(df: pd.DataFrame,
         l0_col: Column name for L0 values.
         save_path: Optional path to save the figure.
     """
+    is_normalized = "normalized" in l0_col.lower()
+    y_label = "L0 / Total Features" if is_normalized else "L0 (Active Features)"
+    title = "Normalized L0 Per Layer by Condition" if is_normalized else "L0 Per Layer by Condition"
+
     n_conditions = len(condition_order)
     fig, axes = plt.subplots(1, n_conditions, figsize=(6 * n_conditions, 6), sharey=True)
 
@@ -2073,7 +2077,7 @@ def plot_l0_per_layer_by_condition(df: pd.DataFrame,
         cond_df = df[df[condition_col] == condition]
         stats = cond_df.groupby(layer_col)[l0_col].agg(['mean', 'std']).reset_index()
         all_means.extend(stats['mean'].values)
-        all_stds.extend(stats['std'].values)
+        all_stds.extend(stats['std'].fillna(0).values)
 
     y_max = max(m + s for m, s in zip(all_means, all_stds)) * 1.1
 
@@ -2084,7 +2088,7 @@ def plot_l0_per_layer_by_condition(df: pd.DataFrame,
         stats = cond_df.groupby(layer_col)[l0_col].agg(['mean', 'std']).reset_index()
         layers = stats[layer_col].values
         means = stats['mean'].values
-        stds = stats['std'].values
+        stds = stats['std'].fillna(0).values
 
         color = CUSTOM_PALETTE[i % len(CUSTOM_PALETTE)]
 
@@ -2094,14 +2098,14 @@ def plot_l0_per_layer_by_condition(df: pd.DataFrame,
 
         ax.set_xlabel("Layer", labelpad=10)
         if i == 0:
-            ax.set_ylabel("L0 (Active Features)", labelpad=10)
+            ax.set_ylabel(y_label, labelpad=10)
         ax.set_title(condition, pad=10, fontweight='bold')
         ax.set_ylim(0, y_max)
         ax.set_xticks(layers[::2])  # Show every other layer to avoid crowding
 
         sns.despine(ax=ax, left=(i > 0), bottom=True)
 
-    plt.suptitle("L0 Per Layer by Condition", fontsize=14, fontweight='bold', y=1.02)
+    plt.suptitle(title, fontsize=14, fontweight='bold', y=1.02)
     plt.tight_layout()
 
     if save_path:
@@ -2128,6 +2132,10 @@ def plot_l0_per_layer_line(df: pd.DataFrame,
         l0_col: Column name for L0 values.
         save_path: Optional path to save the figure.
     """
+    is_normalized = "normalized" in l0_col.lower()
+    y_label = "L0 / Total Features" if is_normalized else "L0 (Active Features)"
+    title = "Normalized L0 Per Layer by Condition" if is_normalized else "L0 Per Layer by Condition"
+
     fig, ax = plt.subplots(figsize=(10, 6))
 
     for i, condition in enumerate(condition_order):
@@ -2135,7 +2143,7 @@ def plot_l0_per_layer_line(df: pd.DataFrame,
         stats = cond_df.groupby(layer_col)[l0_col].agg(['mean', 'std']).reset_index()
         layers = stats[layer_col].values
         means = stats['mean'].values
-        stds = stats['std'].values
+        stds = stats['std'].fillna(0).values
 
         color = CUSTOM_PALETTE[i % len(CUSTOM_PALETTE)]
 
@@ -2144,8 +2152,8 @@ def plot_l0_per_layer_line(df: pd.DataFrame,
         ax.fill_between(layers, means - stds, means + stds, color=color, alpha=0.2)
 
     ax.set_xlabel("Layer", labelpad=10)
-    ax.set_ylabel("L0 (Active Features)", labelpad=10)
-    ax.set_title("L0 Per Layer by Condition", fontsize=14, fontweight='bold')
+    ax.set_ylabel(y_label, labelpad=10)
+    ax.set_title(title, fontsize=14, fontweight='bold')
     ax.legend(title="Condition", loc='best')
     sns.despine(ax=ax)
 

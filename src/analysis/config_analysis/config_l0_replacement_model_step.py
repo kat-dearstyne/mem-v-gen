@@ -1,4 +1,4 @@
-from typing import List
+from typing import Dict, List, Any
 
 import torch
 from torch import Tensor
@@ -36,13 +36,22 @@ class ConfigL0ReplacementModelStep(ConfigAnalyzeStep):
         Run the L0 analysis on all graphs.
 
         Returns:
-            Dictionary mapping prompt IDs to L0 per layer tensors.
+            Dictionary with 'results' (per-prompt L0 tensors) and 'd_transcoder'.
         """
         results = {}
+        d_transcoder = None
+
         for prompt_id, prompt in self.graph_analyzer.prompts.items():
             l0_per_layer = self.compute_l0_for_prompt(prompt)
             results[prompt_id] = l0_per_layer
-        return results
+
+        if not IS_TEST:
+            d_transcoder = self.model_manager.get_d_transcoder()
+
+        return {
+            "results": results,
+            "d_transcoder": d_transcoder
+        }
 
     def compute_l0_for_prompt(self, prompt_str: str) -> Tensor:
         """

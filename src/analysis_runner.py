@@ -420,7 +420,7 @@ def run_cross_condition_analysis(
         for idx, submodel_num in enumerate(submodel_nums):
             condition_name = SUBMODELS[submodel_num]
             print(f"\n{'='*50}")
-            print(f"Running condition: {condition_name}")
+            print(f"Running condition: {condition_name} (submodel_num={submodel_num})")
             print(f"{'='*50}")
 
             cross_config_results = run_for_all_configs(
