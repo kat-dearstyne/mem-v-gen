@@ -1,9 +1,0 @@
-{
-  "MAIN_PROMPT": "The quick brown fox jumps over the lazy",
-  "DIFF_PROMPTS": [
-    "The quick brown fox jumps over the",
-    "The quick brown",
-    "The best pet to own is a",
-    "Tad would put a leash on the bird and walk him around the house like a"
-  ]
-}

@@ -1,8 +1,0 @@
-{
-  "MAIN_PROMPT": "The quick brown fox jumps over the",
-  "DIFF_PROMPTS": [
-    "The quick brown fox jumps over the lazy",
-    "The quick brown"
-  ],
-  "SIM_PROMPTS": ["The quick brown fox jumps over a"]
-}
