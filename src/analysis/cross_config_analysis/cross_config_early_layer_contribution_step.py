@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 import pandas as pd
 
@@ -10,9 +10,8 @@ from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import
 )
 from src.metrics import EarlyLayerMetrics
 
-# Column names derived from enum
-EARLY_LAYER_FRACTION_COL = EarlyLayerMetrics.EARLY_LAYER_FRACTION.value
-MAX_LAYER_COL = EarlyLayerMetrics.MAX_LAYER.value
+EARLY_LAYER_FRACTION_COL: str = EarlyLayerMetrics.EARLY_LAYER_FRACTION.value
+MAX_LAYER_COL: str = EarlyLayerMetrics.MAX_LAYER.value
 
 
 class CrossConfigEarlyLayerContributionStep(CrossConfigAnalyzeStep):
@@ -40,7 +39,7 @@ class CrossConfigEarlyLayerContributionStep(CrossConfigAnalyzeStep):
         """Column names for early layer metrics."""
         return [m.value for m in EarlyLayerMetrics]
 
-    def run(self, config_results: Dict[str, Dict[SupportedConfigAnalyzeStep, Any]]) -> pd.DataFrame | None:
+    def run(self, config_results: Dict[str, Dict[SupportedConfigAnalyzeStep, Any]]) -> Optional[pd.DataFrame]:
         """
         Aggregates early layer contribution results across configs and saves to CSV.
 

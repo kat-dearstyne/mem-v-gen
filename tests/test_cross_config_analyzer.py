@@ -7,10 +7,10 @@ import pandas as pd
 
 from src.analysis.cross_config_analysis.cross_config_analyzer import CrossConfigAnalyzer, STEP2CLASS
 from src.analysis.cross_config_analysis.cross_config_error_ranking_step import (
-    CrossConfigErrorRankingStep, PooledStatsResult, ConditionStatsResult
+    CrossConfigErrorRankingStep
 )
 from src.analysis.cross_config_analysis.cross_config_replacement_model_accuracy_step import (
-    CrossConfigReplacementModelAccuracyStep, SignificanceStats, OmnibusSignificanceResult
+    CrossConfigReplacementModelAccuracyStep
 )
 from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import (
     CrossConfigSubgraphFilterStep, DIFF_KEY, SIM_KEY, SHARED_FEATURES_KEY,
@@ -437,48 +437,6 @@ class TestCrossConfigErrorRankingStep(unittest.TestCase):
 class TestCrossConfigReplacementModelAccuracyStep(unittest.TestCase):
     """Tests for CrossConfigReplacementModelAccuracyStep."""
 
-    def test_compute_cohens_d_same_groups(self):
-        """Test Cohen's d is 0 for identical groups."""
-        group = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-
-        d = CrossConfigReplacementModelAccuracyStep.compute_cohens_d(group, group)
-
-        self.assertAlmostEqual(d, 0.0, places=4)
-
-    def test_compute_cohens_d_different_groups(self):
-        """Test Cohen's d for different groups."""
-        group1 = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-        group2 = np.array([4.0, 5.0, 6.0, 7.0, 8.0])
-
-        d = CrossConfigReplacementModelAccuracyStep.compute_cohens_d(group1, group2)
-
-        # Group2 mean is higher, so d should be negative
-        self.assertLess(d, 0)
-        # Effect size should be large (means differ by 3, std is ~1.58)
-        self.assertLess(d, -1.0)
-
-    def test_compute_rank_biserial(self):
-        """Test rank-biserial correlation calculation."""
-        # When U = n1*n2/2, r should be 0
-        n1, n2 = 10, 10
-        mw_stat = (n1 * n2) / 2
-
-        r = CrossConfigReplacementModelAccuracyStep.compute_rank_biserial(mw_stat, n1, n2)
-
-        self.assertAlmostEqual(r, 0.0, places=4)
-
-    def test_compute_rank_biserial_extreme(self):
-        """Test rank-biserial at extremes."""
-        n1, n2 = 10, 10
-
-        # When U = n1*n2, r = 1
-        r_max = CrossConfigReplacementModelAccuracyStep.compute_rank_biserial(n1 * n2, n1, n2)
-        self.assertAlmostEqual(r_max, 1.0, places=4)
-
-        # When U = 0, r = -1
-        r_min = CrossConfigReplacementModelAccuracyStep.compute_rank_biserial(0, n1, n2)
-        self.assertAlmostEqual(r_min, -1.0, places=4)
-
     def test_is_significant(self):
         """Test significance threshold checking."""
         self.assertTrue(CrossConfigReplacementModelAccuracyStep.is_significant(0.01))
@@ -496,19 +454,21 @@ class TestCrossConfigReplacementModelAccuracyStep(unittest.TestCase):
 
     def test_compute_significance_stats(self):
         """Test computing significance statistics between groups."""
+        from src.metrics import SignificanceMetrics
+
         group1 = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         group2 = np.array([6.0, 7.0, 8.0, 9.0, 10.0])
 
         step = CrossConfigReplacementModelAccuracyStep()
         stats = step.compute_significance_stats(group1, group2)
 
-        self.assertIsInstance(stats, SignificanceStats)
-        self.assertAlmostEqual(stats.group1_mean, 3.0, places=4)
-        self.assertAlmostEqual(stats.group2_mean, 8.0, places=4)
-        self.assertEqual(stats.n_per_group, 5)
+        self.assertIsInstance(stats, dict)
+        self.assertAlmostEqual(stats[SignificanceMetrics.GROUP1_MEAN.value], 3.0, places=4)
+        self.assertAlmostEqual(stats[SignificanceMetrics.GROUP2_MEAN.value], 8.0, places=4)
+        self.assertEqual(stats[SignificanceMetrics.N_PER_GROUP.value], 5)
 
         # Groups are clearly different, so should be significant
-        self.assertLess(stats.t_p_value, 0.05)
+        self.assertLess(stats[SignificanceMetrics.T_P_VALUE.value], 0.05)
 
     def test_apply_bh_correction(self):
         """Test Benjamini-Hochberg FDR correction."""
@@ -863,6 +823,162 @@ class TestStepMapping(unittest.TestCase):
                 issubclass(step_cls, CrossConfigAnalyzeStep),
                 f"{step_cls} is not a subclass of CrossConfigAnalyzeStep"
             )
+
+
+class TestCrossConfigL0ReplacementModelStep(unittest.TestCase):
+    """Tests for CrossConfigL0ReplacementModelStep."""
+
+    def test_init_stores_paths(self):
+        """Test that init stores save_path and load_path."""
+        from src.analysis.cross_config_analysis.cross_config_l0_replacement_model_step import (
+            CrossConfigL0ReplacementModelStep
+        )
+
+        save_path = Path("/tmp/save")
+        load_path = Path("/tmp/load")
+        step = CrossConfigL0ReplacementModelStep(save_path=save_path, load_path=load_path)
+
+        self.assertEqual(step.save_path, save_path)
+        self.assertEqual(step.load_path, load_path)
+
+    def test_init_load_path_defaults_to_save_path(self):
+        """Test that load_path defaults to save_path when not provided."""
+        from src.analysis.cross_config_analysis.cross_config_l0_replacement_model_step import (
+            CrossConfigL0ReplacementModelStep
+        )
+
+        save_path = Path("/tmp/save")
+        step = CrossConfigL0ReplacementModelStep(save_path=save_path)
+
+        self.assertEqual(step.load_path, save_path)
+
+    def test_extract_results_handles_new_format(self):
+        """Test _extract_results handles new format with d_transcoder."""
+        from src.analysis.cross_config_analysis.cross_config_l0_replacement_model_step import (
+            CrossConfigL0ReplacementModelStep
+        )
+
+        config_results = {
+            "config1": {
+                SupportedConfigAnalyzeStep.L0_REPLACEMENT_MODEL: {
+                    "results": {"prompt1": [1.0, 2.0, 3.0]},
+                    "d_transcoder": 1000
+                }
+            }
+        }
+
+        step = CrossConfigL0ReplacementModelStep(save_path=Path("/tmp"))
+        results = step._extract_results(config_results)
+
+        self.assertIsNotNone(results)
+        self.assertIn("config1", results)
+        self.assertEqual(results["config1"]["d_transcoder"], 1000)
+
+    def test_compute_layer_stats(self):
+        """Test _compute_layer_stats returns correct statistics."""
+        from src.analysis.cross_config_analysis.cross_config_l0_replacement_model_step import (
+            CrossConfigL0ReplacementModelStep, L0_VALUE_COL, LAYER_COL
+        )
+
+        df = pd.DataFrame({
+            LAYER_COL: [0, 0, 0, 1, 1, 1],
+            L0_VALUE_COL: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        })
+
+        step = CrossConfigL0ReplacementModelStep(save_path=Path("/tmp"))
+        stats = step._compute_layer_stats(df)
+
+        self.assertEqual(len(stats), 2)  # Two layers
+        self.assertAlmostEqual(stats[stats[LAYER_COL] == 0]["mean"].iloc[0], 2.0, places=4)
+        self.assertAlmostEqual(stats[stats[LAYER_COL] == 1]["mean"].iloc[0], 5.0, places=4)
+
+    def test_run_returns_none_when_save_path_is_none(self):
+        """Test that run returns None when save_path is None."""
+        from src.analysis.cross_config_analysis.cross_config_l0_replacement_model_step import (
+            CrossConfigL0ReplacementModelStep
+        )
+
+        step = CrossConfigL0ReplacementModelStep(save_path=None)
+        result = step.run({})
+
+        self.assertIsNone(result)
+
+
+class TestCrossConfigEarlyLayerContributionStep(unittest.TestCase):
+    """Tests for CrossConfigEarlyLayerContributionStep."""
+
+    def test_init_stores_save_path(self):
+        """Test that init stores save_path."""
+        from src.analysis.cross_config_analysis.cross_config_early_layer_contribution_step import (
+            CrossConfigEarlyLayerContributionStep
+        )
+
+        save_path = Path("/tmp/test")
+        step = CrossConfigEarlyLayerContributionStep(save_path=save_path)
+
+        self.assertEqual(step.save_path, save_path)
+
+    def test_config_results_key_is_early_layer_contribution(self):
+        """Test that step uses EARLY_LAYER_CONTRIBUTION key."""
+        from src.analysis.cross_config_analysis.cross_config_early_layer_contribution_step import (
+            CrossConfigEarlyLayerContributionStep
+        )
+
+        step = CrossConfigEarlyLayerContributionStep()
+        self.assertEqual(step.CONFIG_RESULTS_KEY, SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION)
+
+    def test_metric_cols_includes_early_layer_metrics(self):
+        """Test that metric_cols includes early layer metrics."""
+        from src.analysis.cross_config_analysis.cross_config_early_layer_contribution_step import (
+            CrossConfigEarlyLayerContributionStep
+        )
+        from src.metrics import EarlyLayerMetrics
+
+        step = CrossConfigEarlyLayerContributionStep()
+        cols = step.metric_cols
+
+        for metric in EarlyLayerMetrics:
+            self.assertIn(metric.value, cols)
+
+    def test_run_returns_none_when_no_results(self):
+        """Test that run returns None when no early layer results found."""
+        from src.analysis.cross_config_analysis.cross_config_early_layer_contribution_step import (
+            CrossConfigEarlyLayerContributionStep
+        )
+
+        config_results = {"config1": {}}
+        step = CrossConfigEarlyLayerContributionStep()
+        result = step.run(config_results)
+
+        self.assertIsNone(result)
+
+    def test_run_returns_dataframe(self):
+        """Test that run returns DataFrame with correct columns."""
+        from src.analysis.cross_config_analysis.cross_config_early_layer_contribution_step import (
+            CrossConfigEarlyLayerContributionStep, EARLY_LAYER_FRACTION_COL, MAX_LAYER_COL
+        )
+        from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import (
+            CONFIG_NAME_COL, PROMPT_TYPE_COL
+        )
+
+        config_results = {
+            "config1": {
+                SupportedConfigAnalyzeStep.EARLY_LAYER_CONTRIBUTION: {
+                    "memorized": {2: 0.5, 3: 0.6},
+                    "random": {2: 0.3, 3: 0.4}
+                }
+            }
+        }
+
+        step = CrossConfigEarlyLayerContributionStep()
+        result = step.run(config_results)
+
+        self.assertIsInstance(result, pd.DataFrame)
+        self.assertIn(CONFIG_NAME_COL, result.columns)
+        self.assertIn(PROMPT_TYPE_COL, result.columns)
+        self.assertIn(MAX_LAYER_COL, result.columns)
+        self.assertIn(EARLY_LAYER_FRACTION_COL, result.columns)
+        self.assertEqual(len(result), 4)  # 2 prompt types * 2 max_layers
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ from src.analysis.cross_condition_analysis.cross_condition_analyzer import (
 )
 from src.analysis.cross_condition_analysis.cross_condition_analyze_step import CrossConditionAnalyzeStep
 from src.analysis.cross_condition_analysis.cross_condition_overlap_visualization_step import (
-    CrossConditionOverlapVisualizationStep, INTERSECTION_METRICS_KEY, metric_to_title
+    CrossConditionOverlapVisualizationStep, INTERSECTION_METRICS_KEY
 )
 from src.analysis.cross_condition_analysis.cross_condition_feature_overlap_visualization_step import (
     CrossConditionFeatureOverlapVisualizationStep
@@ -194,25 +194,6 @@ class TestCrossConditionAnalyzeStep(unittest.TestCase):
 
         self.assertEqual(condition_order, ["x", "y"])
         self.assertEqual(config_order, ["z"])
-
-
-class TestMetricToTitle(unittest.TestCase):
-    """Tests for metric_to_title helper function."""
-
-    def test_converts_jaccard_index(self):
-        """Test conversion of jaccard_index."""
-        result = metric_to_title(ComparisonMetrics.JACCARD_INDEX)
-        self.assertEqual(result, "Jaccard Index")
-
-    def test_converts_weighted_jaccard(self):
-        """Test conversion of weighted_jaccard."""
-        result = metric_to_title(ComparisonMetrics.WEIGHTED_JACCARD)
-        self.assertEqual(result, "Weighted Jaccard")
-
-    def test_converts_output_probability(self):
-        """Test conversion of output_probability."""
-        result = metric_to_title(ComparisonMetrics.OUTPUT_PROBABILITY)
-        self.assertEqual(result, "Output Probability")
 
 
 class TestCrossConditionOverlapVisualizationStep(unittest.TestCase):
@@ -471,6 +452,121 @@ class TestCrossConditionEarlyLayerStep(unittest.TestCase):
         step.run(condition_results)
 
         mock_threshold.assert_not_called()
+
+
+class TestCrossConditionL0Step(unittest.TestCase):
+    """Tests for CrossConditionL0Step."""
+
+    @staticmethod
+    def create_l0_df() -> pd.DataFrame:
+        """Create mock L0 DataFrame."""
+        from src.analysis.cross_config_analysis.cross_config_l0_replacement_model_step import (
+            L0_VALUE_COL, L0_NORMALIZED_COL, LAYER_COL, PROMPT_ID_COL, D_TRANSCODER_COL
+        )
+        return pd.DataFrame({
+            CONFIG_NAME_COL: ["config1", "config1", "config2", "config2"],
+            PROMPT_ID_COL: ["p1", "p1", "p2", "p2"],
+            LAYER_COL: [0, 1, 0, 1],
+            L0_VALUE_COL: [100.0, 200.0, 150.0, 250.0],
+            L0_NORMALIZED_COL: [0.1, 0.2, 0.15, 0.25],
+            D_TRANSCODER_COL: [1000, 1000, 1000, 1000]
+        })
+
+    def test_config_results_key_is_l0_replacement_model(self):
+        """Test that step uses L0_REPLACEMENT_MODEL key."""
+        from src.analysis.cross_condition_analysis.cross_condition_l0_step import CrossConditionL0Step
+
+        step = CrossConditionL0Step()
+        self.assertEqual(step.CONFIG_RESULTS_KEY, SupportedConfigAnalyzeStep.L0_REPLACEMENT_MODEL)
+
+    def test_results_sub_key_is_df(self):
+        """Test that step uses 'df' sub-key."""
+        from src.analysis.cross_condition_analysis.cross_condition_l0_step import CrossConditionL0Step
+
+        step = CrossConditionL0Step()
+        self.assertEqual(step.RESULTS_SUB_KEY, "df")
+
+    def test_run_returns_none_when_no_data(self):
+        """Test that run returns None when no L0 data found."""
+        from src.analysis.cross_condition_analysis.cross_condition_l0_step import CrossConditionL0Step
+
+        condition_results = {"cond1": {}}
+        step = CrossConditionL0Step()
+        result = step.run(condition_results)
+
+        self.assertIsNone(result)
+
+    @patch('src.analysis.cross_condition_analysis.cross_condition_l0_step.plot_l0_per_layer_by_condition')
+    @patch('src.analysis.cross_condition_analysis.cross_condition_l0_step.plot_l0_per_layer_line')
+    def test_run_returns_combined_dataframe(self, mock_line, mock_bar):
+        """Test that run returns combined DataFrame."""
+        from src.analysis.cross_condition_analysis.cross_condition_l0_step import CrossConditionL0Step
+
+        condition_results = {
+            "cond1": {
+                SupportedConfigAnalyzeStep.L0_REPLACEMENT_MODEL: {
+                    "df": self.create_l0_df()
+                }
+            },
+            "cond2": {
+                SupportedConfigAnalyzeStep.L0_REPLACEMENT_MODEL: {
+                    "df": self.create_l0_df()
+                }
+            }
+        }
+
+        step = CrossConditionL0Step()
+        result = step.run(condition_results)
+
+        self.assertIsInstance(result, pd.DataFrame)
+        self.assertIn(step.CONDITION_COL, result.columns)
+
+    @patch('src.analysis.cross_condition_analysis.cross_condition_l0_step.plot_l0_per_layer_by_condition')
+    @patch('src.analysis.cross_condition_analysis.cross_condition_l0_step.plot_l0_per_layer_line')
+    def test_run_generates_plots_for_raw_and_normalized(self, mock_line, mock_bar):
+        """Test that run generates plots for both raw and normalized L0."""
+        from src.analysis.cross_condition_analysis.cross_condition_l0_step import CrossConditionL0Step
+
+        condition_results = {
+            "cond1": {
+                SupportedConfigAnalyzeStep.L0_REPLACEMENT_MODEL: {
+                    "df": self.create_l0_df()
+                }
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            step = CrossConditionL0Step(save_path=Path(tmpdir))
+            step.run(condition_results)
+
+            # Should call each plot function twice (raw and normalized)
+            self.assertEqual(mock_bar.call_count, 2)
+            self.assertEqual(mock_line.call_count, 2)
+
+    def test_generate_l0_plots_helper(self):
+        """Test _generate_l0_plots helper method."""
+        from src.analysis.cross_condition_analysis.cross_condition_l0_step import (
+            CrossConditionL0Step, L0_COMPARISON_FILENAME
+        )
+        from src.analysis.cross_config_analysis.cross_config_l0_replacement_model_step import L0_VALUE_COL
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            step = CrossConditionL0Step(save_path=Path(tmpdir))
+
+            df = self.create_l0_df()
+            df[step.CONDITION_COL] = "cond1"
+
+            with patch('src.analysis.cross_condition_analysis.cross_condition_l0_step.plot_l0_per_layer_by_condition') as mock_bar, \
+                 patch('src.analysis.cross_condition_analysis.cross_condition_l0_step.plot_l0_per_layer_line') as mock_line:
+
+                step._generate_l0_plots(df, ["cond1"], L0_VALUE_COL, "test_prefix")
+
+                mock_bar.assert_called_once()
+                mock_line.assert_called_once()
+
+                # Check filenames include prefix
+                bar_call_kwargs = mock_bar.call_args[1]
+                self.assertIn("test_prefix", str(bar_call_kwargs['save_path']))
 
 
 if __name__ == '__main__':

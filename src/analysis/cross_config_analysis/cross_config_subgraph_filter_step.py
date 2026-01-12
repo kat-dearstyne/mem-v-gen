@@ -138,7 +138,8 @@ class CrossConfigSubgraphFilterStep(CrossConfigAnalyzeStep):
             **{col: [] for col in self.shared_feature_metric_cols}
         }
 
-    def _extract_intersection_metrics(self, results: Dict[str, List],
+    @staticmethod
+    def _extract_intersection_metrics(results: Dict[str, List],
                                        step_data: Dict[str, Any],
                                        config_name: str) -> None:
         """

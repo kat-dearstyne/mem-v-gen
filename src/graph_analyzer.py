@@ -536,7 +536,6 @@ class GraphAnalyzer:
 
         metric_results[SharedFeatureMetrics.NUM_SHARED] = counts[primary_threshold]
 
-        # Calculate how many of the shared features (primary threshold) each prompt contains
         shared_present_per_prompt = []
         for p_id in prompt_ids:
             found_features = self.find_features(prompt_id=p_id, features=filtered_features[primary_threshold])
@@ -547,7 +546,6 @@ class GraphAnalyzer:
         shared_present_per_prompt = ','.join(str(c) for c in shared_present_per_prompt)
         metric_results[SharedFeatureMetrics.SHARED_PRESENT_PER_PROMPT] = shared_present_per_prompt
 
-        # COUNT_AT_THRESHOLD uses string keys since threshold values are dynamic
         metrics_at_threshold = {SharedFeatureMetrics.COUNT_AT_THRESHOLD.value.format(threshold):
                                     count for threshold, count in counts.items()}
 
@@ -586,11 +584,9 @@ class GraphAnalyzer:
         Returns:
             DataFrame of features meeting the frequency threshold, with ctx_freq column.
         """
-        # Combine all dfs (each already de-duplicated per prompt)
         all_dfs = [self.get_graph_and_df(p_id)[1] for p_id in self.prompts]
         combined_df = pd.concat(all_dfs, ignore_index=True)
 
-        # Get frequencies - counts how many prompts have each feature
         freq_df = GraphManager.get_frequencies(combined_df)
         threshold = (len(prompts2compare) + 1) * (percent_shared / 100)
         shared = freq_df[freq_df["ctx_freq"] >= threshold]
@@ -632,7 +628,6 @@ class GraphAnalyzer:
         Returns:
             List of Feature namedtuples unique to the specified token.
         """
-        # all features except those linked to token of interest
         other_features = set()
         for token, node_ids in output_token_to_linked_features.items():
             if token != token_of_interest:

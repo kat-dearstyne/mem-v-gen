@@ -15,6 +15,7 @@ L0_NORMALIZED_COL = "l0_normalized"
 D_TRANSCODER_COL = "d_transcoder"
 LAYER_COL = "layer"
 PROMPT_ID_COL = "prompt_id"
+RESULTS_COL = "results"
 
 
 class CrossConfigL0ReplacementModelStep(CrossConfigAnalyzeStep):
@@ -30,14 +31,16 @@ class CrossConfigL0ReplacementModelStep(CrossConfigAnalyzeStep):
     L0_FILENAME = "l0_per_layer.csv"
     L0_STATS_FILENAME = "l0_stats.csv"
 
-    def __init__(self, save_path: Path | None = None):
+    def __init__(self, save_path: Path | None = None, load_path: Path | None = None, **kwargs):
         """
         Initializes the cross-config L0 replacement model step.
 
         Args:
             save_path: Base path for saving results.
+            load_path: Path to check for cached results (defaults to save_path).
         """
-        super().__init__(save_path=save_path)
+        super().__init__(save_path=save_path, **kwargs)
+        self.load_path = load_path or save_path
 
     def run(self, config_results: dict[str, dict[SupportedConfigAnalyzeStep, Any]]) -> dict | None:
         """
@@ -54,22 +57,26 @@ class CrossConfigL0ReplacementModelStep(CrossConfigAnalyzeStep):
             Dictionary with 'df' (raw data) and 'stats' (summary statistics),
             or None if no results found.
         """
-        if self.save_path is None:
-            print("Save path is None so skipping l0 analysis")
-            return None
 
-        # Check if results were passed in
         results = self._extract_results(config_results)
-        print("Results found for l0 analysis")
 
         if results:
             self._save_raw_results(results)
             return self._aggregate_results(results)
 
-        # Try to load from file
-        output_path = self.save_path / self.L0_RAW_FILENAME
-        if output_path.exists() and (results := load_json(output_path)):
-            # Populate config_results with loaded data
+        if self.save_path is None:
+            return None
+
+        # Try to load from file (previous run check point)
+        for check_path in [self.load_path, self.save_path]:
+            if check_path is None:
+                continue
+            output_path = check_path / self.L0_RAW_FILENAME
+            if output_path.exists() and (results := load_json(output_path)):
+                print(f"Loaded cached L0 results from: {output_path}")
+                break
+
+        if results:
             for config_name, l0_data in results.items():
                 if config_name not in config_results:
                     config_results[config_name] = {}
@@ -95,12 +102,8 @@ class CrossConfigL0ReplacementModelStep(CrossConfigAnalyzeStep):
             if self.CONFIG_RESULTS_KEY in step_results:
                 step_data = step_results[self.CONFIG_RESULTS_KEY]
                 if step_data:
-                    # Handle both old format (direct dict) and new format (with d_transcoder)
-                    if isinstance(step_data, dict) and "results" in step_data:
+                    if isinstance(step_data, dict) and RESULTS_COL in step_data:
                         results[config_name] = step_data
-                    else:
-                        # Legacy format - wrap in expected structure
-                        results[config_name] = {"results": step_data, "d_transcoder": None}
         return results if results else None
 
     def _save_raw_results(self, results: dict[str, dict[str, Any]]) -> None:
@@ -110,22 +113,22 @@ class CrossConfigL0ReplacementModelStep(CrossConfigAnalyzeStep):
         Converts tensors to lists for JSON serialization.
 
         Args:
-            results: Dictionary mapping config names to {"results": {...}, "d_transcoder": int}.
+            results: Dictionary mapping config names to {"results": {...}, D_TRANSCODER_COL: int}.
         """
         self.save_path.mkdir(parents=True, exist_ok=True)
         output_path = self.save_path / self.L0_RAW_FILENAME
 
         serializable_results = {}
         for config_name, config_data in results.items():
-            prompt_results = config_data.get("results", config_data)
-            d_transcoder = config_data.get("d_transcoder")
+            prompt_results = config_data.get(RESULTS_COL, config_data)
+            d_transcoder = config_data.get(D_TRANSCODER_COL)
 
             serializable_results[config_name] = {
-                "results": {},
-                "d_transcoder": d_transcoder
+                RESULTS_COL: {},
+                D_TRANSCODER_COL: d_transcoder
             }
             for prompt_id, l0_tensor in prompt_results.items():
-                if prompt_id in ("results", "d_transcoder"):
+                if prompt_id in (RESULTS_COL, D_TRANSCODER_COL):
                     continue
                 if isinstance(l0_tensor, torch.Tensor):
                     l0_values = l0_tensor.cpu().tolist()
@@ -133,7 +136,7 @@ class CrossConfigL0ReplacementModelStep(CrossConfigAnalyzeStep):
                     l0_values = l0_tensor.tolist()
                 else:
                     l0_values = list(l0_tensor)
-                serializable_results[config_name]["results"][prompt_id] = l0_values
+                serializable_results[config_name][RESULTS_COL][prompt_id] = l0_values
 
         save_json(serializable_results, output_path)
         print(f"L0 raw results saved to: {output_path}")
@@ -151,11 +154,11 @@ class CrossConfigL0ReplacementModelStep(CrossConfigAnalyzeStep):
         rows = []
 
         for config_name, config_data in results.items():
-            prompt_results = config_data.get("results", config_data)
-            d_transcoder = config_data.get("d_transcoder")
+            prompt_results = config_data.get(RESULTS_COL, config_data)
+            d_transcoder = config_data.get(D_TRANSCODER_COL)
 
             for prompt_id, l0_tensor in prompt_results.items():
-                if prompt_id in ("results", "d_transcoder"):
+                if prompt_id in (RESULTS_COL, D_TRANSCODER_COL):
                     continue
                 if isinstance(l0_tensor, torch.Tensor):
                     l0_values = l0_tensor.cpu().numpy()

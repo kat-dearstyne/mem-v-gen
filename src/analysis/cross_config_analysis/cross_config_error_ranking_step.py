@@ -6,9 +6,9 @@ import pandas as pd
 from scipy.stats import wilcoxon, ttest_rel
 
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
-from src.analysis.config_analysis.config_error_ranking_step import ErrorRankingMetrics, ConfigErrorRankingStep
+from src.analysis.config_analysis.config_error_ranking_step import ConfigErrorRankingStep
 from src.analysis.cross_config_analysis.cross_config_analyze_step import CrossConfigAnalyzeStep
-from src.metrics import PooledStatsMetrics, ConditionStatsMetrics, RawScoreMetrics
+from src.metrics import PooledStatsMetrics, ConditionStatsMetrics, RawScoreMetrics, ErrorRankingMetrics
 from src.utils import append_to_dict_list, get_conditions_from_label, create_label_from_conditions
 from src.visualizations import boxplot_metric_family, plot_delta_distribution
 
@@ -62,7 +62,6 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
         all_deltas = {}
 
         for condition_name in condition_names:
-            # Extract results for this condition across all samples
             condition_results = [config_results[sample_id][self.CONFIG_RESULTS_KEY][condition_name] for sample_id in sample_ids]
 
             deltas = self.extract_metric_deltas(condition_results)
@@ -96,8 +95,9 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
 
         return all_results
 
-    def raw_scores_to_csv(self, g1_values: Dict[str, Any], g2_values: Dict[str, Any],
-                          deltas: Dict[str, Any], filepath: Path,
+    def raw_scores_to_csv(self, g1_values: Dict[ErrorRankingMetrics, Any],
+                          g2_values: Dict[ErrorRankingMetrics, Any],
+                          deltas: Dict[ErrorRankingMetrics, Any], filepath: Path,
                           sample_ids: List[str] = None):
         """
         Saves individual sample scores to a CSV file.
@@ -133,7 +133,7 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
         df.to_csv(filepath, index=False)
         return df
 
-    def stats_to_csv(self, stats: dict[str, Any], filepath: Path) -> pd.DataFrame:
+    def stats_to_csv(self, stats: Dict[ErrorRankingMetrics, Any], filepath: Path) -> pd.DataFrame:
         """
         Saves aggregated statistics to a CSV file.
 
@@ -158,7 +158,8 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
         df.to_csv(filepath, index=False)
         return df
 
-    def pooled_condition_stats(self, all_deltas: Dict[str, Dict[str, Any]]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def pooled_condition_stats(self, all_deltas: Dict[str, Dict[ErrorRankingMetrics, Any]]) -> Tuple[
+        Dict[ErrorRankingMetrics, Any], Dict[ErrorRankingMetrics, Any]]:
         """
         Pools delta values across all conditions and computes summary statistics.
 
@@ -193,7 +194,8 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
         stats = self._process_metrics(pooled_deltas, compute_stats)
         return stats, pooled_deltas
 
-    def extract_raw_values(self, condition_results: List[Dict[str, Any]]):
+    def extract_raw_values(self, condition_results: List[Dict[ErrorRankingMetrics, Any]]) -> Tuple[
+        Dict[ErrorRankingMetrics, Any], Dict[ErrorRankingMetrics, Any]]:
         """
         Extracts metric values for individual samples from pair comparison results.
 
@@ -220,7 +222,7 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
 
         return g1, g2
 
-    def extract_metric_deltas(self, condition_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def extract_metric_deltas(self, condition_results: List[Dict[ErrorRankingMetrics, Any]]) -> Dict[ErrorRankingMetrics, Any]:
         """
         Extracts delta (graph1 - graph2) values from pair comparison results.
 
@@ -245,7 +247,7 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
 
         return deltas
 
-    def condition_level_stats(self, deltas: Dict[str, Any]) -> Dict[str, Any]:
+    def condition_level_stats(self, deltas: Dict[ErrorRankingMetrics, Any]) -> Dict[ErrorRankingMetrics, Any]:
         """
         Computes statistical tests and summary statistics for each metric's delta values.
 
@@ -275,8 +277,9 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
 
         return self._process_metrics(deltas, compute_stats)
 
-    def _process_metrics(self, data: Dict[str, Any],
-                         fn: Callable[[ErrorRankingMetrics, Any, Any], Any]) -> Dict[str, Any]:
+    @staticmethod
+    def _process_metrics(data: Dict[ErrorRankingMetrics, Any],
+                         fn: Callable[[ErrorRankingMetrics, Any, Any], Any]) -> Dict[ErrorRankingMetrics, Any]:
         """
         Iterates through all metrics in data and applies a function to each.
 
@@ -298,7 +301,8 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
                     results[metric] = fn(metric, None, metric_data)
         return results
 
-    def _init_metric_structure(self) -> Dict[ErrorRankingMetrics, Any]:
+    @staticmethod
+    def _init_metric_structure() -> Dict[ErrorRankingMetrics, Any]:
         """
         Initializes an empty metric structure ({} for K_METRICS, [] for others).
 
@@ -308,8 +312,8 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
         return {metric: ({} if metric in ConfigErrorRankingStep.K_METRICS else [])
                 for metric in ConfigErrorRankingStep.ALL_METRICS}
 
-    def _combine_results_across_conditions(self, all_deltas: dict[str, dict[str, Any]]) -> dict[
-        str, dict[Any, Any] | list[Any]]:
+    def _combine_results_across_conditions(self, all_deltas: Dict[str, Dict[ErrorRankingMetrics, Any]]) -> Dict[
+        ErrorRankingMetrics, Any]:
         """
         Combines delta values from all conditions into pooled lists.
 
@@ -335,8 +339,10 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
 
         return pooled_deltas
 
-    def _save_results(self, output_path: Path, stats: Dict[str, Any], deltas: Dict[str, Any],
-                      label: str, g1_values: Dict[str, Any] = None, g2_values: Dict[str, Any] = None,
+    def _save_results(self, output_path: Path, stats: Dict[ErrorRankingMetrics, Any],
+                      deltas: Dict[ErrorRankingMetrics, Any], label: str,
+                      g1_values: Dict[ErrorRankingMetrics, Any] = None,
+                      g2_values: Dict[ErrorRankingMetrics, Any] = None,
                       sample_ids: List[str] = None, is_pooled: bool = False):
         """
         Saves analysis results (stats, plots, CSVs) to the specified path.
@@ -353,25 +359,21 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
         """
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # Save raw scores CSV (only for non-pooled with raw values)
         if g1_values is not None and g2_values is not None:
             self.raw_scores_to_csv(g1_values, g2_values, deltas, sample_ids=sample_ids,
                                    filepath=output_path / "error-results-individual.csv")
 
-        # Save boxplots for each metric
         for metric in ConfigErrorRankingStep.K_METRICS:
             if metric in deltas:
                 boxplot_metric_family(deltas[metric], metric.get_printable(),
                                       label = label,
                                       save_path=output_path / f"{metric.name.lower()}_boxplot.png")
 
-        # Save delta distribution plot (only for pooled)
         if is_pooled and ErrorRankingMetrics.AP in deltas:
             plot_delta_distribution(deltas[ErrorRankingMetrics.AP],
                                     "Average Precision Δ Distribution (Pooled)",
                                     label = label,
                                     save_path=output_path / "ap_distribution.png")
 
-        # Save stats CSV
         self.stats_to_csv(stats, filepath=output_path / "error-results.csv")
         print(f"Saved error results for '{label}' to: {output_path}")

@@ -264,28 +264,31 @@ def run_for_config(config_dir: Path, config_name: str,
     return results
 
 
-def get_results_base_dir() -> Path:
+def get_results_base_dir() -> tuple[Path, Path | None]:
     """
-    Get the base directory for saving results.
+    Get the base directory for saving results and optional load path.
 
     Uses RESULTS_DIR env var if set, otherwise generates from current datetime.
     If RESULTS_DIR is set but already exists, appends datetime to make it unique.
 
     Returns:
-        Path to the results base directory.
+        Tuple of (save_path, load_path). load_path is the original RESULTS_DIR
+        path for loading cached results, or None if no RESULTS_DIR set.
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if dirname := os.getenv("RESULTS_DIR", "").strip():
-        results_path = OUTPUT_DIR / dirname
-        if results_path.exists():
-            results_path = OUTPUT_DIR / f"{dirname}_{timestamp}"
-        return results_path
-    return OUTPUT_DIR / timestamp
+        load_path = OUTPUT_DIR / dirname
+        save_path = load_path
+        if save_path.exists():
+            save_path = OUTPUT_DIR / f"{dirname}_{timestamp}"
+        return save_path, load_path
+    return OUTPUT_DIR / timestamp, None
 
 
 def run_for_all_configs(config_names: List[str] = None, config_dir: str = None,
                         run_error_analysis: bool = False, submodel_num: int = 0,
                         save_path: Optional[Path] = None,
+                        load_path: Optional[Path] = None,
                         prompt_ids: Optional[List[str]] = None
                         ) -> Dict[SupportedConfigAnalyzeStep, Any]:
     """
@@ -299,6 +302,7 @@ def run_for_all_configs(config_names: List[str] = None, config_dir: str = None,
         submodel_num: Index of submodel to use.
         save_path: Optional path for saving results. If not provided, generates from
             RESULTS_DIR env var or current datetime.
+        load_path: Optional path to check for cached results (for reloading).
         prompt_ids: Optional list of prompt IDs to override config/env.
 
     Returns:
@@ -324,10 +328,10 @@ def run_for_all_configs(config_names: List[str] = None, config_dir: str = None,
 
     print(f"Finished running all {len(config_names)} configs.")
     if save_path is None:
-        save_path = get_results_base_dir()
+        save_path, load_path = get_results_base_dir()
 
     analyzer = CrossConfigAnalyzer(all_config_results, save_path=save_path)
-    return analyzer.run()
+    return analyzer.run(load_path=load_path)
 
 
 def get_prompt_ids_for_condition(
@@ -390,15 +394,15 @@ def run_cross_condition_analysis(
     condition_results = {}
     config_dirs = config_dirs or []
     submodel_nums = submodel_nums or [0]
+    run_order = []
 
-    # Create base results directory for all conditions
-    base_results_dir = get_results_base_dir()
+    base_results_dir, load_base_dir = get_results_base_dir()
 
     if len(config_dirs) > 1:
-        # Iterate over config directories, use single submodel
         submodel_num = submodel_nums[0]
         for idx, config_dir in enumerate(config_dirs):
             condition_name = Path(config_dir).name or "default"
+            run_order.append(condition_name)
             print(f"\n{'='*50}")
             print(f"Running condition: {condition_name}")
             print(f"{'='*50}")
@@ -409,6 +413,7 @@ def run_cross_condition_analysis(
                 run_error_analysis=run_error_analysis,
                 submodel_num=submodel_num,
                 save_path=base_results_dir / condition_name,
+                load_path=load_base_dir / condition_name if load_base_dir else None,
                 prompt_ids=get_prompt_ids_for_condition(prompt_ids_per_condition, idx)
             )
             condition_results[condition_name] = cross_config_results
@@ -419,6 +424,7 @@ def run_cross_condition_analysis(
 
         for idx, submodel_num in enumerate(submodel_nums):
             condition_name = SUBMODELS[submodel_num]
+            run_order.append(condition_name)
             print(f"\n{'='*50}")
             print(f"Running condition: {condition_name} (submodel_num={submodel_num})")
             print(f"{'='*50}")
@@ -429,6 +435,7 @@ def run_cross_condition_analysis(
                 run_error_analysis=run_error_analysis,
                 submodel_num=submodel_num,
                 save_path=base_results_dir / condition_name,
+                load_path=load_base_dir / condition_name if load_base_dir else None,
                 prompt_ids=get_prompt_ids_for_condition(prompt_ids_per_condition, idx)
             )
             condition_results[condition_name] = cross_config_results
@@ -440,7 +447,9 @@ def run_cross_condition_analysis(
         print("No condition results to analyze")
         return {}
 
-    # Save cross-condition analysis in base directory
+    if condition_order is None:
+        condition_order = run_order
+
     return analyze_conditions(
         condition_results,
         save_dir=base_results_dir,

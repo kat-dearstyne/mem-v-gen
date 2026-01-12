@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -10,6 +10,7 @@ from src.constants import TOP_K
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
 from src.analysis.config_analysis.config_replacement_model_accuracy_step import ConfigReplacementModelAccuracyStep
 from src.analysis.cross_config_analysis.cross_config_analyze_step import CrossConfigAnalyzeStep
+from src.analysis.significance_tester import SignificanceTester
 from src.metrics import (
     Metrics, ReplacementAccuracyMetrics, ComplexityMetrics,
     SignificanceMetrics, OmnibusSignificanceMetrics
@@ -126,7 +127,7 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
         print(f"Replacement model results saved to: {output_path}")
 
     def analyze_results(self, results: dict[str, dict[str, Any]],
-                        target_condition: str | None = None) -> dict[str, dict]:
+                        target_condition: str | None = None) -> Optional[dict[str, dict]]:
         """
         Analyze results and create visualizations comparing conditions.
 
@@ -142,7 +143,7 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
 
         if df.empty:
             print("No results to analyze")
-            return
+            return None
 
         all_results = {}
         conditions = df["condition"].unique().tolist()
@@ -216,7 +217,8 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
 
         return comparison_df
 
-    def df_to_results_dict(self, df: pd.DataFrame,
+    @staticmethod
+    def df_to_results_dict(df: pd.DataFrame,
                            metrics_enum: type[Metrics] = SignificanceMetrics) -> dict[str, dict[str, Any]]:
         """
         Convert DataFrame rows to a dictionary keyed by metric name.
@@ -403,33 +405,8 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
         Returns:
             Dictionary with SignificanceMetrics values as keys.
         """
-        n1, n2 = len(group1), len(group2)
-
-        # T-test (parametric)
-        t_stat, t_p = stats.ttest_ind(group1, group2, alternative=alternative, equal_var=False)
-
-        # Mann-Whitney U test (non-parametric)
-        mw_stat, mw_p = stats.mannwhitneyu(group1, group2, alternative=alternative)
-
-        # Effect sizes
-        cohens_d = self.compute_cohens_d(group1, group2)
-        rank_biserial = self.compute_rank_biserial(mw_stat, n1, n2)
-
-        return {
-            SignificanceMetrics.GROUP1_MEAN.value: group1.mean(),
-            SignificanceMetrics.GROUP2_MEAN.value: group2.mean(),
-            SignificanceMetrics.GROUP1_STD.value: np.std(group1, ddof=1),
-            SignificanceMetrics.GROUP2_STD.value: np.std(group2, ddof=1),
-            SignificanceMetrics.N_PER_GROUP.value: n1,
-            SignificanceMetrics.T_STATISTIC.value: t_stat,
-            SignificanceMetrics.T_P_VALUE.value: t_p,
-            SignificanceMetrics.T_SIGNIFICANT.value: self.is_significant(t_p),
-            SignificanceMetrics.MANN_WHITNEY_U.value: mw_stat,
-            SignificanceMetrics.MW_P_VALUE.value: mw_p,
-            SignificanceMetrics.MW_SIGNIFICANT.value: self.is_significant(mw_p),
-            SignificanceMetrics.COHENS_D.value: cohens_d,
-            SignificanceMetrics.RANK_BISERIAL_R.value: rank_biserial,
-        }
+        tester = SignificanceTester(alpha=self.SIGNIFICANCE_THRESHOLD)
+        return tester.compute_stats(group1, group2, alternative)
 
     @staticmethod
     def get_token_complexity(token: str) -> dict[ComplexityMetrics, float]:
@@ -464,20 +441,7 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
         Returns:
             DataFrame with added *_bh and *_significant_bh columns.
         """
-        for metric_name in results_df.columns:
-            if metric_name.endswith("p_value"):
-                p_values = results_df[metric_name].values
-                valid_mask = ~np.isnan(p_values)
-                adjusted = np.full_like(p_values, np.nan, dtype=float)
-
-                if valid_mask.any():
-                    adjusted[valid_mask] = stats.false_discovery_control(p_values[valid_mask], method='bh')
-
-                column_name = f"{metric_name}_bh"
-                results_df[column_name] = adjusted
-                sign_col_name = column_name.replace("p_value", "significant")
-                results_df[sign_col_name] = CrossConfigReplacementModelAccuracyStep.is_significant(adjusted)
-        return results_df
+        return SignificanceTester.apply_bh_correction(results_df)
 
     @staticmethod
     def is_significant(p_value: float | np.ndarray,
@@ -492,41 +456,7 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
         Returns:
             Boolean or array of booleans indicating significance.
         """
-        return p_value < significance_threshold
-
-    @staticmethod
-    def compute_cohens_d(group1: np.ndarray, group2: np.ndarray) -> float:
-        """
-        Compute Cohen's d effect size using pooled standard deviation.
-
-        Uses the average of variances (Welch-consistent, equal-n friendly).
-
-        Args:
-            group1: First group of values.
-            group2: Second group of values.
-
-        Returns:
-            Cohen's d effect size.
-        """
-        sx = np.std(group1, ddof=1)
-        sy = np.std(group2, ddof=1)
-        denom = np.sqrt((sx ** 2 + sy ** 2) / 2)
-        return (group1.mean() - group2.mean()) / denom if denom > 0 else 0.0
-
-    @staticmethod
-    def compute_rank_biserial(mw_stat: float, n1: int, n2: int) -> float:
-        """
-        Compute rank-biserial correlation from Mann-Whitney U statistic.
-
-        Args:
-            mw_stat: Mann-Whitney U statistic.
-            n1: Size of first group.
-            n2: Size of second group.
-
-        Returns:
-            Rank-biserial correlation coefficient (r = 2U/(n1*n2) - 1).
-        """
-        return (2 * mw_stat) / (n1 * n2) - 1
+        return SignificanceTester.is_significant(p_value, significance_threshold)
 
     @staticmethod
     def _get_metric_values_for_condition(df: pd.DataFrame, metric: Metrics | str,
@@ -560,7 +490,8 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
                 (metric in ConfigReplacementModelAccuracyStep.HIGHER_IS_BETTER_METRICS or
                  metric in ConfigReplacementModelAccuracyStep.LOWER_IS_BETTER_METRICS)]
 
-    def _to_df(self, results: dict[str, dict[str, Any]]) -> pd.DataFrame:
+    @staticmethod
+    def _to_df(results: dict[str, dict[str, Any]]) -> pd.DataFrame:
         """
         Convert nested results dictionary to a flat DataFrame.
 

@@ -167,6 +167,5 @@ class ReplacementModelManager:
         Returns:
             Full hook name string (e.g., 'blocks.0.hook_resid_mid').
         """
-        # Get hook name from transcoders (e.g., "hook_resid_mid" or "hook_mlp_out")
         hook_point = getattr(model.transcoders, hook_attr)
         return f"blocks.{layer}.{hook_point}"

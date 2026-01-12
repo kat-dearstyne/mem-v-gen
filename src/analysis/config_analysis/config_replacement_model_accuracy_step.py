@@ -82,7 +82,7 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
 
         return results
 
-    def run_accuracy_test(self, prompt_str: str) -> dict[str, Any]:
+    def run_accuracy_test(self, prompt_str: str) -> dict[ReplacementAccuracyMetrics, Any]:
         """
         Run accuracy comparison for a single prompt.
 
@@ -214,13 +214,12 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
         Returns:
             List of cross-entropy values, one per position.
         """
-        model = self.get_model()
+        model = self.model_manager.get_model()
 
         # Tokenize the completion to get the first token
         completion_tokens = model.tokenizer.encode(self.memorized_completion, add_special_tokens=False)
         first_completion_token = completion_tokens[0]
 
-        # Ensure prompt_tokens is 1D
         tokens = prompt_tokens.squeeze() if prompt_tokens.dim() > 1 else prompt_tokens
 
         logits = base_logits_BPV[0].float()  # (seq_len, vocab)
@@ -445,5 +444,5 @@ class ConfigReplacementModelAccuracyStep(ConfigAnalyzeStep):
         top_token_id = logits_bpv[0, -1].argmax().item()
         output = ModelOutput(logits_BPV=logits_bpv,
                              top_token_id=top_token_id,
-                             top_token=self.get_model().tokenizer.decode([top_token_id]))
+                             top_token=self.model_manager.get_model().tokenizer.decode([top_token_id]))
         return output

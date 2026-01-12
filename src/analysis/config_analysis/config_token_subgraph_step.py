@@ -3,17 +3,15 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 from src.analysis.config_analysis.config_analyze_step import ConfigAnalyzeStep
+from src.graph_analyzer import GraphAnalyzer
 from src.utils import get_method_kwargs
-
-if TYPE_CHECKING:
-    from src.graph_analyzer import GraphAnalyzer
 
 
 class ConfigTokenSubgraphStep(ConfigAnalyzeStep):
     """Compares subgraphs for different output tokens to find unique features."""
 
     def __init__(self,
-                 graph_analyzer: "GraphAnalyzer",
+                 graph_analyzer: GraphAnalyzer,
                  prompt_id: str,
                  token_of_interest: str,
                  create_subgraph: bool = True,

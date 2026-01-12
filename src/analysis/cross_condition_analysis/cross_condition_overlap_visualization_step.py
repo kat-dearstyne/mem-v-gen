@@ -109,7 +109,6 @@ class CrossConditionOverlapVisualizationStep(CrossConditionAnalyzeStep):
         col = metric.value
         title = metric.get_printable()
 
-        # Bar chart
         plot_metric_by_condition(
             df, metric_col=col,
             title=f'{title} by Condition',
@@ -119,7 +118,6 @@ class CrossConditionOverlapVisualizationStep(CrossConditionAnalyzeStep):
             save_path=save_path / f"{col}_bar.png" if save_path else None,
         )
 
-        # Heatmap
         plot_metric_heatmap(
             df, metric_col=col,
             title=f'{title} Heatmap',
@@ -129,7 +127,6 @@ class CrossConditionOverlapVisualizationStep(CrossConditionAnalyzeStep):
             save_path=save_path / f"{col}_heatmap.png" if save_path else None
         )
 
-        # Boxplot
         plot_metric_boxplot(
             df, metric_col=col,
             title=f'{title} Distribution by Condition',
@@ -139,7 +136,6 @@ class CrossConditionOverlapVisualizationStep(CrossConditionAnalyzeStep):
             save_path=save_path / f"{col}_boxplot.png" if save_path else None
         )
 
-        # Line plot (with optional extra series for jaccard)
         extra = self.extra_series if metric == ComparisonMetrics.JACCARD_INDEX else None
         plot_metric_line(
             df, metric_col=col,

@@ -4,19 +4,17 @@ import pandas as pd
 
 from src.analysis.config_analysis.config_analyze_step import ConfigAnalyzeStep
 from src.constants import MIN_ACTIVATION_DENSITY
+from src.graph_analyzer import GraphAnalyzer
 from src.graph_manager import GraphManager
 from src.metrics import ComparisonMetrics
 from src.utils import get_method_kwargs
-
-if TYPE_CHECKING:
-    from src.graph_analyzer import GraphAnalyzer
 
 
 class ConfigSubgraphFilterStep(ConfigAnalyzeStep):
     """Filters subgraph to features shared with some prompts and unique from others."""
 
     def __init__(self,
-                 graph_analyzer: "GraphAnalyzer",
+                 graph_analyzer: GraphAnalyzer,
                  main_prompt_id: str,
                  prompts_with_shared_features: List[str] = None,
                  prompts_with_unique_features: List[str] = None,
@@ -51,12 +49,13 @@ class ConfigSubgraphFilterStep(ConfigAnalyzeStep):
         unique_features, overlapping_features = None, None
 
         if self.prompts_with_unique_features:
-            unique_features,  results['diff'] = self.graph_analyzer.nodes_not_in(self.main_prompt_id,
-                                                                             self.prompts_with_unique_features,
-                                                              metrics2run=self.metrics2run)
+            unique_features, results['diff'] = self.graph_analyzer.nodes_not_in(self.main_prompt_id,
+                                                                                self.prompts_with_unique_features,
+                                                                                metrics2run=self.metrics2run)
         if self.prompts_with_shared_features:
-            overlapping_features,  results['sim'] = self.graph_analyzer.nodes_in(self.main_prompt_id, self.prompts_with_shared_features,
-                                                              metrics2run=self.metrics2run)
+            overlapping_features, results['sim'] = self.graph_analyzer.nodes_in(self.main_prompt_id,
+                                                                                self.prompts_with_shared_features,
+                                                                                metrics2run=self.metrics2run)
 
         if unique_features is not None and overlapping_features is not None:
             features_of_interest = pd.merge(overlapping_features, unique_features, how='inner',

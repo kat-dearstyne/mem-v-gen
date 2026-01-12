@@ -1,21 +1,18 @@
-from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-import numpy as np
 import pandas as pd
-from scipy import stats
 
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
 from src.analysis.cross_condition_analysis.cross_condition_analyze_step import (
     CrossConditionAnalyzeStep
 )
-from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import (
-    CONFIG_NAME_COL, PROMPT_TYPE_COL
-)
 from src.analysis.cross_config_analysis.cross_config_early_layer_contribution_step import (
     EARLY_LAYER_FRACTION_COL, MAX_LAYER_COL
 )
-from src.metrics import EarlyLayerMetrics
+from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import (
+    PROMPT_TYPE_COL
+)
+from src.analysis.significance_tester import SignificanceTester
 from src.visualizations import (
     plot_early_layer_boxplot,
     plot_early_layer_mean_comparison,
@@ -123,10 +120,8 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
         Returns:
             Dictionary with statistical test results and significance DataFrame.
         """
-        results = {}
-
         if len(condition_order) < 2:
-            return results
+            return {}
 
         # Get data for each condition
         condition_data = {}
@@ -134,60 +129,13 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
             cond_df = df[df[self.CONDITION_COL] == condition]
             condition_data[condition] = cond_df[EARLY_LAYER_FRACTION_COL].dropna().values
 
-        # Calculate descriptive stats per condition
-        for condition, values in condition_data.items():
-            results[f'{condition}_mean'] = float(np.mean(values)) if len(values) > 0 else np.nan
-            results[f'{condition}_std'] = float(np.std(values)) if len(values) > 0 else np.nan
-            results[f'{condition}_n'] = len(values)
+        tester = SignificanceTester(alpha=SIGNIFICANCE_THRESHOLD)
 
-        # Pairwise comparisons between conditions
-        conditions = list(condition_data.keys())
-        significance_rows = []
+        results = tester.get_descriptive_stats(condition_data)
 
-        for i, cond1 in enumerate(conditions):
-            for cond2 in conditions[i+1:]:
-                vals1 = condition_data[cond1]
-                vals2 = condition_data[cond2]
-
-                if len(vals1) < 2 or len(vals2) < 2:
-                    continue
-
-                row = {'metric': EARLY_LAYER_FRACTION_COL, 'comparison': f'{cond1} vs {cond2}'}
-
-                # Mann-Whitney U test (non-parametric)
-                try:
-                    u_stat, u_pval = stats.mannwhitneyu(vals1, vals2, alternative='two-sided')
-                    row['mw_p_value'] = float(u_pval)
-                    row['mw_significant'] = u_pval < SIGNIFICANCE_THRESHOLD
-                    # Rank-biserial correlation
-                    n1, n2 = len(vals1), len(vals2)
-                    row['rank_biserial_r'] = (2 * u_stat) / (n1 * n2) - 1
-                    results[f'{cond1}_vs_{cond2}_mannwhitney_p'] = float(u_pval)
-                except Exception:
-                    pass
-
-                # Independent t-test
-                try:
-                    t_stat, t_pval = stats.ttest_ind(vals1, vals2, equal_var=False)
-                    row['t_p_value'] = float(t_pval)
-                    row['t_significant'] = t_pval < SIGNIFICANCE_THRESHOLD
-                    results[f'{cond1}_vs_{cond2}_ttest_p'] = float(t_pval)
-                except Exception:
-                    pass
-
-                # Effect size (Cohen's d)
-                try:
-                    sx, sy = np.std(vals1, ddof=1), np.std(vals2, ddof=1)
-                    denom = np.sqrt((sx ** 2 + sy ** 2) / 2)
-                    row['cohens_d'] = (np.mean(vals1) - np.mean(vals2)) / denom if denom > 0 else 0.0
-                    results[f'{cond1}_vs_{cond2}_cohens_d'] = row['cohens_d']
-                except Exception:
-                    pass
-
-                significance_rows.append(row)
-
-        if significance_rows:
-            results['_significance_df'] = pd.DataFrame(significance_rows)
+        sig_df = tester.compare_multiple_groups(condition_data, metric_name=EARLY_LAYER_FRACTION_COL)
+        if not sig_df.empty:
+            results['_significance_df'] = sig_df
 
         return results
 
@@ -211,23 +159,17 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
             save_path=save_path / 'early_layer_boxplot.png' if save_path else None
         )
 
-        # Get p-value for significance annotation
         p_value = None
-        if len(condition_order) == 2:
-            cond1, cond2 = condition_order
-            p_key = f'{cond1}_vs_{cond2}_mannwhitney_p'
-            if p_key not in stats_results:
-                p_key = f'{cond2}_vs_{cond1}_mannwhitney_p'
-            p_value = stats_results.get(p_key)
+        sig_df = stats_results.get('_significance_df')
+        if sig_df is not None and len(condition_order) == 2 and not sig_df.empty:
+            p_value = sig_df['mw_p_value'].iloc[0]
 
-        # Bar chart with means and error bars
         plot_early_layer_mean_comparison(
             df, condition_order, p_value=p_value,
             condition_col=self.CONDITION_COL,
             save_path=save_path / 'early_layer_mean_comparison.png' if save_path else None
         )
 
-        # Line plot by config
         if config_order:
             plot_early_layer_by_config(
                 df, condition_order, config_order,
@@ -235,10 +177,8 @@ class CrossConditionEarlyLayerStep(CrossConditionAnalyzeStep):
                 save_path=save_path / 'early_layer_by_config.png' if save_path else None
             )
 
-        # Prompt type comparisons across conditions
         self._generate_prompt_type_visualizations(df, condition_order)
 
-        # Significance effect size visualization
         sig_df = stats_results.get('_significance_df')
         if sig_df is not None and save_path:
             sig_df.to_csv(save_path / EARLY_LAYER_SIGNIFICANCE_FILENAME, index=False)

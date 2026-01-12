@@ -129,11 +129,13 @@ class TestConfigAnalyzerRun(unittest.TestCase):
         mock_graph_analyzer_cls.return_value = mock_graph_analyzer
 
         # Mock the step class
-        with patch.dict(STEP2CLASS, {SupportedConfigAnalyzeStep.SUBGRAPH_FILTER: MagicMock()}):
-            mock_step_instance = MagicMock()
-            mock_step_instance.run.return_value = {"result": "test"}
-            STEP2CLASS[SupportedConfigAnalyzeStep.SUBGRAPH_FILTER].return_value = mock_step_instance
+        mock_step_cls = MagicMock()
+        mock_step_cls.__name__ = "MockStep"
+        mock_step_instance = MagicMock()
+        mock_step_instance.run.return_value = {"result": "test"}
+        mock_step_cls.return_value = mock_step_instance
 
+        with patch.dict(STEP2CLASS, {SupportedConfigAnalyzeStep.SUBGRAPH_FILTER: mock_step_cls}):
             analyzer = ConfigAnalyzer(neuronpedia_manager=self.mock_npm, prompts=self.prompts)
             results = analyzer.run(SupportedConfigAnalyzeStep.SUBGRAPH_FILTER, main_prompt_id="main")
 
@@ -146,15 +148,22 @@ class TestConfigAnalyzerRun(unittest.TestCase):
         mock_graph_analyzer = TestConfigAnalyzerFixtures.create_mock_graph_analyzer()
         mock_graph_analyzer_cls.return_value = mock_graph_analyzer
 
-        # Mock step classes
-        mock_step1 = MagicMock()
-        mock_step1.run.return_value = {"step1": "result1"}
-        mock_step2 = MagicMock()
-        mock_step2.run.return_value = {"step2": "result2"}
+        # Mock step classes with __name__ attribute
+        mock_step1_cls = MagicMock()
+        mock_step1_cls.__name__ = "MockStep1"
+        mock_step1_instance = MagicMock()
+        mock_step1_instance.run.return_value = {"step1": "result1"}
+        mock_step1_cls.return_value = mock_step1_instance
+
+        mock_step2_cls = MagicMock()
+        mock_step2_cls.__name__ = "MockStep2"
+        mock_step2_instance = MagicMock()
+        mock_step2_instance.run.return_value = {"step2": "result2"}
+        mock_step2_cls.return_value = mock_step2_instance
 
         with patch.dict(STEP2CLASS, {
-            SupportedConfigAnalyzeStep.SUBGRAPH_FILTER: MagicMock(return_value=mock_step1),
-            SupportedConfigAnalyzeStep.ERROR_RANKING: MagicMock(return_value=mock_step2)
+            SupportedConfigAnalyzeStep.SUBGRAPH_FILTER: mock_step1_cls,
+            SupportedConfigAnalyzeStep.ERROR_RANKING: mock_step2_cls
         }):
             analyzer = ConfigAnalyzer(neuronpedia_manager=self.mock_npm, prompts=self.prompts)
             results = analyzer.run(
@@ -664,6 +673,92 @@ class TestSupportedConfigAnalyzeStepMapping(unittest.TestCase):
 
         for step in expected_steps:
             self.assertIn(step, STEP2CLASS)
+
+
+class TestConfigL0ReplacementModelStep(unittest.TestCase):
+    """Tests for ConfigL0ReplacementModelStep."""
+
+    def setUp(self):
+        self.mock_graph_analyzer = TestConfigAnalyzerFixtures.create_mock_graph_analyzer()
+
+    def test_get_test_output_returns_tensor(self):
+        """Test that _get_test_output returns a tensor of zeros."""
+        from src.analysis.config_analysis.config_l0_replacement_model_step import ConfigL0ReplacementModelStep
+
+        result = ConfigL0ReplacementModelStep._get_test_output()
+
+        self.assertEqual(result.dtype, torch.float32)
+        self.assertEqual(result.sum().item(), 0.0)
+
+    @patch('src.analysis.config_analysis.config_l0_replacement_model_step.IS_TEST', True)
+    def test_compute_l0_for_prompt_in_test_mode(self):
+        """Test compute_l0_for_prompt returns dummy output in test mode."""
+        from src.analysis.config_analysis.config_l0_replacement_model_step import ConfigL0ReplacementModelStep
+
+        step = ConfigL0ReplacementModelStep(graph_analyzer=self.mock_graph_analyzer)
+        result = step.compute_l0_for_prompt("test prompt")
+
+        self.assertIsInstance(result, torch.Tensor)
+
+    @patch('src.analysis.config_analysis.config_l0_replacement_model_step.IS_TEST', True)
+    def test_run_returns_results_dict(self):
+        """Test that run returns dict with results and d_transcoder keys."""
+        from src.analysis.config_analysis.config_l0_replacement_model_step import ConfigL0ReplacementModelStep
+
+        step = ConfigL0ReplacementModelStep(graph_analyzer=self.mock_graph_analyzer)
+        result = step.run()
+
+        self.assertIn("results", result)
+        self.assertIn("d_transcoder", result)
+        self.assertIsInstance(result["results"], dict)
+
+
+class TestConfigEarlyLayerContributionStep(unittest.TestCase):
+    """Tests for ConfigEarlyLayerContributionStep."""
+
+    def setUp(self):
+        self.mock_graph_analyzer = TestConfigAnalyzerFixtures.create_mock_graph_analyzer()
+
+    def test_init_stores_max_layer(self):
+        """Test that init stores max_layer parameter."""
+        from src.analysis.config_analysis.config_early_layer_contribution_step import ConfigEarlyLayerContributionStep
+
+        step = ConfigEarlyLayerContributionStep(
+            graph_analyzer=self.mock_graph_analyzer,
+            max_layer=5
+        )
+
+        self.assertEqual(step.max_layer, 5)
+
+    def test_init_max_layer_defaults_to_none(self):
+        """Test that max_layer defaults to None."""
+        from src.analysis.config_analysis.config_early_layer_contribution_step import ConfigEarlyLayerContributionStep
+
+        step = ConfigEarlyLayerContributionStep(graph_analyzer=self.mock_graph_analyzer)
+
+        self.assertIsNone(step.max_layer)
+
+    def test_run_with_specific_max_layer(self):
+        """Test run with specific max_layer."""
+        from src.analysis.config_analysis.config_early_layer_contribution_step import ConfigEarlyLayerContributionStep
+
+        # Mock the early layer contribution method
+        self.mock_graph_analyzer.get_early_layer_contribution_fraction = MagicMock(return_value=0.5)
+
+        step = ConfigEarlyLayerContributionStep(
+            graph_analyzer=self.mock_graph_analyzer,
+            max_layer=2
+        )
+
+        results = step.run()
+
+        # Should have results for each prompt
+        self.assertIn("main", results)
+        self.assertIn("other", results)
+
+        # Each should have only the specified max_layer
+        self.assertIn(2, results["main"])
+        self.assertEqual(results["main"][2], 0.5)
 
 
 if __name__ == "__main__":

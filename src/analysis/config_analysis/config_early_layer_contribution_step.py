@@ -1,16 +1,14 @@
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from src.analysis.config_analysis.config_analyze_step import ConfigAnalyzeStep
-
-if TYPE_CHECKING:
-    from src.graph_analyzer import GraphAnalyzer
+from src.graph_analyzer import GraphAnalyzer
 
 
 class ConfigEarlyLayerContributionStep(ConfigAnalyzeStep):
     """Calculates early layer contribution fraction for all prompts in config."""
 
     def __init__(self,
-                 graph_analyzer: "GraphAnalyzer",
+                 graph_analyzer: GraphAnalyzer,
                  max_layer: Optional[int] = None,
                  **kwargs):
         """

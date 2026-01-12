@@ -6,13 +6,10 @@ import numpy as np
 from scipy.stats import mannwhitneyu
 
 from src.analysis.config_analysis.config_analyze_step import ConfigAnalyzeStep
+from src.graph_analyzer import GraphAnalyzer
 from src.graph_manager import GraphManager
 from src.metrics import ErrorRankingMetrics
 from src.utils import create_label_from_conditions
-
-if TYPE_CHECKING:
-    from src.graph_analyzer import GraphAnalyzer
-
 
 MannWhitneyResult = namedtuple("MannWhitneyResult",
                                ["percentile_ranks_1", "percentile_ranks_2", "u_statistic", "p_value"])
@@ -27,7 +24,7 @@ class ConfigErrorRankingStep(ConfigAnalyzeStep):
     K_METRICS = [ErrorRankingMetrics.TOP_K, ErrorRankingMetrics.NDCG]
 
     def __init__(self,
-                 graph_analyzer: "GraphAnalyzer",
+                 graph_analyzer: GraphAnalyzer,
                  main_prompt_id: str,
                  comparison_prompt_ids: List[str] = None,
                  metrics2run: Set[ErrorRankingMetrics] = None,
@@ -117,12 +114,10 @@ class ConfigErrorRankingStep(ConfigAnalyzeStep):
         ks = self.DEFAULT_Ks if ks is None else ks
         results = {}
 
-        # Handle Mann-Whitney separately (doesn't use permutation test)
         if ErrorRankingMetrics.MANN_WHITNEY in self.metrics2run:
             print(f"Running error test for {ErrorRankingMetrics.MANN_WHITNEY.value}.")
             results[ErrorRankingMetrics.MANN_WHITNEY] = self.error_rank_mannwhitney(nodes1, nodes2)
 
-        # Process permutation test metrics
         for metric in self.ALL_METRICS:
             if metric not in self.metrics2run:
                 continue
