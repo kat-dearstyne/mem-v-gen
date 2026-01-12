@@ -20,6 +20,7 @@ class ConfigSubgraphFilterStep(ConfigAnalyzeStep):
                  prompts_with_unique_features: List[str] = None,
                  metrics2run: Set[ComparisonMetrics] = None,
                  create_subgraph: bool = False,
+                 activation_density: int = MIN_ACTIVATION_DENSITY,
                  **kwargs):
         """
         Args:
@@ -35,6 +36,7 @@ class ConfigSubgraphFilterStep(ConfigAnalyzeStep):
         self.prompts_with_unique_features = prompts_with_unique_features
         self.metrics2run = metrics2run
         self.create_subgraph = create_subgraph
+        self.activation_density = activation_density
         super().__init__(graph_analyzer=graph_analyzer, **kwargs)
 
     def run(self) -> Dict[str, Any]:
@@ -65,7 +67,7 @@ class ConfigSubgraphFilterStep(ConfigAnalyzeStep):
 
         if self.create_subgraph:
             features_of_interest = self.graph_analyzer.neuronpedia_manager.filter_features_for_subgraph(
-                features_of_interest, main_graph, filter_by_act_density=MIN_ACTIVATION_DENSITY
+                features_of_interest, main_graph, filter_by_act_density=self.activation_density
             )
 
             self.graph_analyzer.neuronpedia_manager.create_subgraph_from_selected_features(

@@ -33,9 +33,7 @@ SUBMODELS = AVAILABLE_MODELS[MODEL]
 """
 ========= Random ===========
 """
-MIN_ACTIVATION_DENSITY=30
-PROMPT_IDS_MEMORIZED = ["memorized", "rephrased", "made-up", "random"]
-PROMPT_ID_BASELINE = ["made-up", "made-up vs rephrased", "made-up vs random"]
+MIN_ACTIVATION_DENSITY=None
 TOP_K = 4
 FEATURE_LAYER = "25"
 FEATURE_ID = "9031"
