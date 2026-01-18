@@ -1,0 +1,9 @@
+{
+  "DATASET": {
+    "name": "allenai/c4",
+    "num_samples": 100,
+    "text_column": "text",
+    "subset": "en",
+    "seed": 42
+  }
+}
