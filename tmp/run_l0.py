@@ -17,7 +17,7 @@ from src.analysis.config_analysis.config_l0_replacement_model_step import Config
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
 from src.analysis.cross_config_analysis.cross_config_analyzer import CrossConfigAnalyzer
 from src.analysis_runner import _load_prompts_from_dataset, get_results_base_dir
-from src.constants import CONFIG_BASE_DIR, DEFAULT_BATCH_SIZE
+from src.constants import CONFIG_BASE_DIR
 
 from gemma_scope_2_clt_manager import GemmaScope2CLTModelManager
 
@@ -27,7 +27,6 @@ def run_l0_for_config(
         config_name: str,
         model_variant: str = "1b-it",
         clt_config: str = "width_262k_l0_medium",
-        batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> Dict[SupportedConfigAnalyzeStep, Any]:
     """
     Run L0 analysis for a config using Gemma Scope 2 CLTs.
@@ -37,7 +36,6 @@ def run_l0_for_config(
         config_name: Name of the config file (without .json extension).
         model_variant: Gemma model variant (e.g., "1b-it", "270m-pt").
         clt_config: CLT configuration name.
-        batch_size: Batch size for processing.
 
     Returns:
         Dictionary mapping SupportedConfigAnalyzeStep to results.
@@ -64,27 +62,21 @@ def run_l0_for_config(
     prompt_texts = list(prompts.values())
     num_prompts = len(prompt_texts)
 
-    # Process in batches to save memory
+    # Process one prompt at a time to minimize memory usage
     all_l0 = []
-    for batch_start in range(0, num_prompts, batch_size):
-        batch_end = min(batch_start + batch_size, num_prompts)
-        batch_prompts = prompt_texts[batch_start:batch_end]
+    for i, prompt_text in enumerate(prompt_texts):
+        hidden_states = manager.get_hidden_states(prompt_text)
+        features = manager.encode_features(hidden_states)
+        l0 = ConfigL0ReplacementModelStep.compute_l0_per_layer(features)
+        all_l0.append(l0.cpu())
 
-        hidden_states_batch = manager.get_hidden_states_batch(batch_prompts, batch_size=len(batch_prompts))
-
-        # Process each prompt's hidden states
-        batch_l0 = []
-        for i in range(hidden_states_batch.shape[0]):
-            prompt_hs = [hidden_states_batch[i, layer] for layer in range(hidden_states_batch.shape[1])]
-            features = manager.encode_features(prompt_hs)
-            l0 = ConfigL0ReplacementModelStep.compute_l0_per_layer(features)
-            batch_l0.append(l0)
-
-        all_l0.extend(batch_l0)
-
-        del hidden_states_batch, features
+        # Clean up GPU memory after each prompt
+        del hidden_states, features
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+        if (i + 1) % 10 == 0:
+            print(f"  Processed {i + 1}/{num_prompts} prompts")
 
     results = {pid: all_l0[i] for i, pid in enumerate(prompt_ids)}
 
@@ -104,7 +96,6 @@ def run_l0_for_all_configs(
         config_dir: str = None,
         model_variant: str = "1b-it",
         clt_config: str = "width_262k_l0_medium",
-        batch_size: int = DEFAULT_BATCH_SIZE,
         save_path: Optional[Path] = None,
 ) -> Dict[SupportedConfigAnalyzeStep, Any]:
     """
@@ -115,7 +106,6 @@ def run_l0_for_all_configs(
         config_dir: Directory containing config files.
         model_variant: Gemma model variant.
         clt_config: CLT configuration name.
-        batch_size: Batch size for processing.
         save_path: Optional path for saving results.
 
     Returns:
@@ -136,7 +126,6 @@ def run_l0_for_all_configs(
             config_name,
             model_variant=model_variant,
             clt_config=clt_config,
-            batch_size=batch_size,
         )
         all_config_results[config_name] = config_results
 

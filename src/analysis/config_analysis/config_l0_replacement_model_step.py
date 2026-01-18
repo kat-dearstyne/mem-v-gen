@@ -1,4 +1,5 @@
-from typing import Dict, List, Any
+from pathlib import Path
+from typing import Dict, List, Any, Optional
 
 import torch
 from torch import Tensor
@@ -7,7 +8,7 @@ from src.analysis.config_analysis.config_analyze_step import ConfigAnalyzeStep
 from src.constants import IS_TEST
 from src.graph_analyzer import GraphAnalyzer
 from src.replacement_model import ReplacementModelManager
-from src.utils import get_method_kwargs
+from src.utils import get_method_kwargs, save_json, load_json
 
 
 class ConfigL0ReplacementModelStep(ConfigAnalyzeStep):
@@ -15,10 +16,13 @@ class ConfigL0ReplacementModelStep(ConfigAnalyzeStep):
     Analysis step calculating L0 (number of active features) for each layer.
     """
 
+    CHECKPOINT_FILENAME = "l0_checkpoint.json"
+
     def __init__(self,
                  graph_analyzer: GraphAnalyzer,
                  prompt_ids: List[str] = None,
                  batch_size: int = None,
+                 save_path: Optional[Path] = None,
                  **kwargs):
         """
         Initializes the L0 replacement model step.
@@ -27,9 +31,14 @@ class ConfigL0ReplacementModelStep(ConfigAnalyzeStep):
             graph_analyzer: GraphAnalyzer instance with loaded graphs.
             prompt_ids: Optional list of prompt IDs to analyze.
             batch_size: If provided runs model with batched input.
+            save_path: Optional path for incremental checkpoint saving.
+
+        Returns:
+            None.
         """
         self.batch_size = batch_size
         self.prompt_ids = prompt_ids
+        self.save_path = save_path
         self.model_manager = ReplacementModelManager(**get_method_kwargs(
             ReplacementModelManager.__init__, kwargs))
         super().__init__(graph_analyzer=graph_analyzer, **kwargs)
@@ -38,21 +47,35 @@ class ConfigL0ReplacementModelStep(ConfigAnalyzeStep):
         """
         Run the L0 analysis on all graphs.
 
+        Args:
+            None.
+
         Returns:
             Dictionary with 'results' (per-prompt L0 tensors) and 'd_transcoder'.
         """
-        results = {}
+        results = self._load_checkpoint()
         d_transcoder = None
 
         if self.batch_size:
             results = self.compute_l0_for_batches()
         else:
             for prompt_id, prompt in self.graph_analyzer.prompts.items():
+                if prompt_id in results:
+                    continue
+
                 l0_per_layer = self.compute_l0_for_prompt(prompt)
-                results[prompt_id] = l0_per_layer
+                results[prompt_id] = l0_per_layer.cpu()
+
+                self._save_checkpoint(results)
+
+                # Free GPU memory
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         if not IS_TEST:
             d_transcoder = self.model_manager.get_d_transcoder()
+
+        self.model_manager.clear()
 
         return {
             "results": results,
@@ -75,7 +98,10 @@ class ConfigL0ReplacementModelStep(ConfigAnalyzeStep):
         model = self.model_manager.get_model()
         prompt_tokens = model.ensure_tokenized(prompt_str)
         features = self.model_manager.encode_features(prompt_tokens)
-        return self.compute_l0_per_layer(features)
+        l0 = self.compute_l0_per_layer(features)
+
+        del features
+        return l0
 
     def compute_l0_for_batches(self) -> dict[str, Tensor]:
         """
@@ -159,3 +185,58 @@ class ConfigL0ReplacementModelStep(ConfigAnalyzeStep):
             l0_per_layer = l0_per_token[:, 1:].mean(dim=-1)  # skip BOS
 
         return l0_per_layer
+
+    def _load_checkpoint(self) -> dict:
+        """
+        Load results from checkpoint file if it exists.
+
+        Args:
+            None.
+
+        Returns:
+            Dictionary of previously saved prompt results, or empty dict.
+        """
+        if self.save_path is None:
+            return {}
+
+        checkpoint_path = self.save_path / self.CHECKPOINT_FILENAME
+        if not checkpoint_path.exists():
+            return {}
+
+        data = load_json(checkpoint_path)
+        if not data:
+            return {}
+
+        # Convert lists back to tensors
+        results = {}
+        for prompt_id, l0_list in data.items():
+            results[prompt_id] = torch.tensor(l0_list)
+
+        print(f"Loaded checkpoint: {len(results)} prompts already completed")
+        return results
+
+    def _save_checkpoint(self, results: dict):
+        """
+        Save current results to checkpoint file.
+
+        Args:
+            results: Dictionary mapping prompt_id to L0 tensor.
+
+        Returns:
+            None.
+        """
+        if self.save_path is None:
+            return
+
+        self.save_path.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = self.save_path / self.CHECKPOINT_FILENAME
+
+        # Convert tensors to lists for JSON
+        serializable = {}
+        for prompt_id, l0_tensor in results.items():
+            if isinstance(l0_tensor, torch.Tensor):
+                serializable[prompt_id] = l0_tensor.cpu().tolist()
+            else:
+                serializable[prompt_id] = list(l0_tensor)
+
+        save_json(serializable, checkpoint_path)

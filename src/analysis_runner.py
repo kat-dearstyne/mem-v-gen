@@ -285,8 +285,7 @@ def run_for_config(config_dir: Path, config_name: str,
 
         results |= analyzer.run(
             SupportedConfigAnalyzeStep.L0_REPLACEMENT_MODEL,
-            sub_model=submodel_num,
-            batch_size=batch_size if config.dataset else None
+            sub_model=submodel_num
         )
         print("==================================\n")
     else:

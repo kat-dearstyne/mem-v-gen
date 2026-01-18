@@ -63,4 +63,7 @@ class DatasetPromptsLoader:
         del sampled
         self._dataset = None
 
+        import gc
+        gc.collect()
+
         return prompts

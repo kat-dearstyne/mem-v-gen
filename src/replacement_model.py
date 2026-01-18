@@ -193,6 +193,26 @@ class ReplacementModelManager:
         model = self.get_model()
         return model.transcoders.d_transcoder
 
+    def clear(self):
+        """
+        Clear the model from memory to free GPU resources.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        if self.__model is not None:
+            del self.__model
+            self.__model = None
+
+        import gc
+        gc.collect()
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     @staticmethod
     def _get_hook_name(model, hook_attr: str, layer: int) -> str:
         """
