@@ -58,4 +58,9 @@ class DatasetPromptsLoader:
             prompt_id = f"{dataset_short_name}_{i}"
             prompts[prompt_id] = sample[self.text_column]
 
+        # Clear dataset from memory
+        del self._dataset
+        del sampled
+        self._dataset = None
+
         return prompts

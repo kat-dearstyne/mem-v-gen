@@ -74,11 +74,15 @@ class ConfigL0ReplacementModelStep(ConfigAnalyzeStep):
 
         model = self.model_manager.get_model()
         prompt_tokens = model.ensure_tokenized(prompt_str)
-        return self.compute_l0_per_layer(prompt_tokens)
+        features = self.model_manager.encode_features(prompt_tokens)
+        return self.compute_l0_per_layer(features)
 
     def compute_l0_for_batches(self) -> dict[str, Tensor]:
         """
         Compute L0 per layer for multiple prompts in batches.
+
+        Processes in batches to avoid memory issues, computing L0 for each
+        batch and discarding features before processing the next batch.
 
         Returns:
             Dictionary mapping prompt_id to L0 tensor of shape (n_layers,).
@@ -91,13 +95,28 @@ class ConfigL0ReplacementModelStep(ConfigAnalyzeStep):
         model = self.model_manager.get_model()
         prompts = [self.graph_analyzer.prompts[p_id] for p_id in prompt_ids]
 
-        # Tokenize with padding, then ensure each is in correct format
+        # Tokenize with padding
         tokenized = model.tokenizer(prompts, padding=True, truncation=True, return_tensors="pt")
         token_list = [model.ensure_tokenized(tokenized["input_ids"][i]) for i in range(len(prompts))]
         prompt_tokens = torch.stack(token_list)
 
-        l0_per_layer = self.compute_l0_per_layer(prompt_tokens)
+        # Process in batches to save memory
+        num_prompts = len(prompt_ids)
+        all_l0 = []
 
+        for batch_start in range(0, num_prompts, self.batch_size):
+            batch_end = min(batch_start + self.batch_size, num_prompts)
+            batch_tokens = prompt_tokens[batch_start:batch_end]
+
+            features = self.model_manager.encode_features(batch_tokens, self.batch_size)
+            batch_l0 = self.compute_l0_per_layer(features)
+            all_l0.append(batch_l0.cpu())
+
+            del features
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        l0_per_layer = torch.cat(all_l0, dim=0)
         return {p_id: l0_per_layer[i] for i, p_id in enumerate(prompt_ids)}
 
     @staticmethod
@@ -116,20 +135,20 @@ class ConfigL0ReplacementModelStep(ConfigAnalyzeStep):
             dims = (batch_size, *dims)
         return torch.zeros(*dims, dtype=torch.float32)
 
-    def compute_l0_per_layer(self, prompt_tokens: Tensor) -> Tensor:
+    @staticmethod
+    def compute_l0_per_layer(features: Tensor) -> Tensor:
         """
-        Compute L0 (average active features) per layer.
+        Compute L0 (average active features) per layer from features tensor.
 
         Args:
-            prompt_tokens: Tokenized prompt tensor of shape (seq_len,) for single prompt,
-                or (num_prompts, seq_len) for batched input.
+            features: Features tensor of shape (n_layers, seq_len, d_transcoder) for single prompt,
+                or (num_prompts, n_layers, seq_len, d_transcoder) for batched input.
 
         Returns:
             Tensor of shape (n_layers,) for single prompt,
             or (num_prompts, n_layers) for batched input.
         """
-        features = self.model_manager.encode_features(prompt_tokens, self.batch_size)
-        is_batched = prompt_tokens.dim() == 2
+        is_batched = features.dim() == 4
 
         non_zero = (features > 0).float()
         l0_per_token = non_zero.sum(dim=-1)  # sum over d_transcoder
