@@ -5,7 +5,7 @@ from typing import List, Optional, Dict, Any
 
 import pandas as pd
 
-from src.analysis.analysis_config import AnalysisConfig, Task
+from src.analysis.analysis_config import AnalysisConfig, DatasetConfig, Task
 from src.analysis.config_analysis.config_analyzer import ConfigAnalyzer
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
 from src.analysis.cross_condition_analysis.cross_condition_analyzer import CrossConditionAnalyzer
@@ -15,7 +15,8 @@ from src.analysis.cross_config_analysis.cross_config_feature_overlap_step import
 from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import (
     CrossConfigSubgraphFilterStep, SHARED_FEATURES_KEY
 )
-from src.constants import DATA_PATH, MODEL, SUBMODELS, TOP_K, CONFIG_BASE_DIR, OUTPUT_DIR
+from src.constants import DATA_PATH, MODEL, SUBMODELS, TOP_K, CONFIG_BASE_DIR, OUTPUT_DIR, DEFAULT_BATCH_SIZE
+from src.dataset_loader import DatasetPromptsLoader
 from src.metrics import FeatureSharingMetrics
 from src.neuronpedia_manager import GraphConfig, NeuronpediaManager
 
@@ -23,6 +24,26 @@ from src.neuronpedia_manager import GraphConfig, NeuronpediaManager
 OVERLAP_ANALYSIS_FILENAME = CrossConfigSubgraphFilterStep.OVERLAP_ANALYSIS_FILENAME
 FEATURE_OVERLAP_METRICS_FILENAME = CrossConfigFeatureOverlapStep.FEATURE_OVERLAP_METRICS_FILENAME
 SHARED_FEATURE_METRICS_FILENAME = CrossConfigSubgraphFilterStep.SHARED_FEATURE_METRICS_FILENAME
+
+
+def _load_prompts_from_dataset(dataset_config: DatasetConfig) -> Dict[str, str]:
+    """
+    Load prompts from a HuggingFace dataset.
+
+    Args:
+        dataset_config: DatasetConfig instance with dataset parameters.
+
+    Returns:
+        Dictionary mapping prompt_id to prompt string.
+    """
+    loader = DatasetPromptsLoader(
+        dataset_name=dataset_config.name,
+        text_column=dataset_config.text_column,
+        split=dataset_config.split,
+        subset=dataset_config.subset,
+        seed=dataset_config.seed
+    )
+    return loader.load(dataset_config.num_samples)
 
 
 def analyze_conditions(condition_results: Dict[str, Dict[SupportedConfigAnalyzeStep, Any]],
@@ -148,7 +169,8 @@ def analyze_conditions_post_run(dirs: List[Path],
 
 def run_for_config(config_dir: Path, config_name: str,
                    run_error_analysis: bool, submodel_num: int = 0,
-                   prompt_ids: Optional[List[str]] = None
+                   prompt_ids: Optional[List[str]] = None,
+                   batch_size: int = DEFAULT_BATCH_SIZE
                    ) -> Dict[SupportedConfigAnalyzeStep, Any]:
     """
     Runs the main logic for a specified prompt config.
@@ -159,6 +181,7 @@ def run_for_config(config_dir: Path, config_name: str,
         run_error_analysis: Whether to run error ranking analysis.
         submodel_num: Index of submodel to use.
         prompt_ids: Optional list of prompt IDs to override config/env.
+        batch_size: Batch size for L0 computation.
 
     Returns:
         Dictionary mapping SupportedConfigAnalyzeStep to results.
@@ -176,9 +199,15 @@ def run_for_config(config_dir: Path, config_name: str,
     graph_dir = os.path.join(base_save_path, "graphs")
     results = {}
 
+    # Load prompts from dataset if configured
+    if config.dataset:
+        prompts = _load_prompts_from_dataset(config.dataset)
+    else:
+        prompts = config.id_to_prompt
+
     graph_config = GraphConfig(model=model, submodel=submodel)
     neuronpedia_manager = NeuronpediaManager(graph_dir=graph_dir, config=graph_config)
-    analyzer = ConfigAnalyzer(neuronpedia_manager, prompts=config.id_to_prompt)
+    analyzer = ConfigAnalyzer(neuronpedia_manager, prompts=prompts)
 
     if config.task == Task.PROMPT_SUBGRAPH_COMPARE:
         print(f"\nStarting run for {config_name} with model {model} and submodel {submodel}")
@@ -250,11 +279,14 @@ def run_for_config(config_dir: Path, config_name: str,
         print("==================================\n")
     elif config.task == Task.L0_REPLACEMENT_MODEL:
         print(f"\nStarting L0 replacement model analysis for {config_name} with model {model} and submodel {submodel}")
+        if config.dataset:
+            print(f"Dataset: {config.dataset.name} ({config.dataset.num_samples} samples)")
         print("==================================")
 
         results |= analyzer.run(
             SupportedConfigAnalyzeStep.L0_REPLACEMENT_MODEL,
-            sub_model=submodel_num
+            sub_model=submodel_num,
+            batch_size=batch_size if config.dataset else None
         )
         print("==================================\n")
     else:

@@ -17,14 +17,14 @@ class CrossConfigErrorRankingStep(CrossConfigAnalyzeStep):
 
     CONFIG_RESULTS_KEY = SupportedConfigAnalyzeStep.ERROR_RANKING
 
-    def __init__(self, save_path: Path = None):
+    def __init__(self, save_path: Path = None, **kwargs):
         """
         Initializes the cross-config error ranking step.
 
         Args:
             save_path: Base path for saving results
         """
-        super().__init__(save_path=save_path)
+        super().__init__(save_path=save_path, **kwargs)
 
     def run(self, config_results: Dict[str, Dict[SupportedConfigAnalyzeStep, Any]]) -> Dict:
         """

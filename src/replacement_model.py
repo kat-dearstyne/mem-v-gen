@@ -68,25 +68,64 @@ class ReplacementModelManager:
         )
         return model
 
-    def encode_features(self, prompt_tokens: Tensor) -> Tensor:
+    def encode_features(self, prompt_tokens: Tensor, batch_size: int = None) -> Tensor:
         """
         Encode activations through transcoders for all layers.
 
         Args:
-            prompt_tokens: Tokenized prompt tensor.
+            prompt_tokens: Tokenized prompt tensor of shape (seq_len,) for single prompt,
+                or (num_prompts, seq_len) for multiple prompts (pre-padded by tokenizer).
+            batch_size: If provided with batched prompt_tokens, processes in chunks of this size.
 
         Returns:
-            Features tensor of shape (n_layers, seq_len, d_transcoder).
+            Features tensor of shape (n_layers, seq_len, d_transcoder) for single prompt,
+            or (num_prompts, n_layers, seq_len, d_transcoder) for batched input.
         """
         model = self.get_model()
+        is_single = prompt_tokens.dim() == 1
+
+        if is_single:
+            prompt_tokens = prompt_tokens.unsqueeze(0)
+
+        num_prompts, seq_len = prompt_tokens.shape
+        batch_size = batch_size or num_prompts
+
+        all_features = torch.zeros(
+            (num_prompts, model.cfg.n_layers, seq_len, model.transcoders.d_transcoder),
+            dtype=torch.bfloat16
+        ).to(model.cfg.device)
+
+        for batch_start in range(0, num_prompts, batch_size):
+            batch_end = min(batch_start + batch_size, num_prompts)
+            batch_tokens = prompt_tokens[batch_start:batch_end]
+            batch_features = self._encode_batch(batch_tokens, model)
+            all_features[batch_start:batch_end] = batch_features
+
+        if is_single:
+            return all_features.squeeze(0)
+
+        return all_features
+
+    def _encode_batch(self, prompt_tokens: Tensor, model) -> Tensor:
+        """
+        Encode activations for a batch of prompts.
+
+        Args:
+            prompt_tokens: Batched tensor of shape (batch_size, seq_len).
+            model: The ReplacementModel instance.
+
+        Returns:
+            Features tensor of shape (batch_size, n_layers, seq_len, d_transcoder).
+        """
+        curr_batch_size, seq_len = prompt_tokens.shape
         features = torch.zeros(
-            (model.cfg.n_layers, len(prompt_tokens), model.transcoders.d_transcoder),
+            (curr_batch_size, model.cfg.n_layers, seq_len, model.transcoders.d_transcoder),
             dtype=torch.bfloat16
         ).to(model.cfg.device)
 
         def input_hook_fn(value, hook, layer):
-            features[layer] = model.transcoders.encode_layer(value, layer)
-            features[:, 0] = 0.  # exclude bos
+            features[:, layer] = model.transcoders.encode_layer(value, layer)
+            features[:, :, 0] = 0.  # exclude bos
             return value
 
         all_hooks = []

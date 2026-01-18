@@ -1,0 +1,8 @@
+{
+  "DATASET": {
+    "name": "roneneldan/TinyStories",
+    "num_samples": 5,
+    "text_column": "text",
+    "seed": 42
+  }
+}

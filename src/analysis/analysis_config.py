@@ -17,6 +17,18 @@ class Task:
 
 
 @dataclass
+class DatasetConfig:
+    """Configuration for loading prompts from a HuggingFace dataset."""
+
+    name: str
+    num_samples: int
+    text_column: str = "text"
+    split: str = "train"
+    subset: Optional[str] = None
+    seed: int = 42
+
+
+@dataclass
 class AnalysisConfig:
     """Configuration for running analysis on a prompt config."""
 
@@ -27,6 +39,7 @@ class AnalysisConfig:
     token_of_interest: Optional[str] = None
     task: Optional[str] = None
     memorized_completion: Optional[str] = None
+    dataset: Optional[DatasetConfig] = None
 
     @classmethod
     def from_file(cls, config_path: Path, prompt_ids_override: List[str] = None) -> "AnalysisConfig":
@@ -41,6 +54,11 @@ class AnalysisConfig:
             AnalysisConfig instance with values from file and environment.
         """
         config_data = load_json(config_path)
+
+        # Check for dataset config
+        dataset_data = config_data.get("DATASET")
+        if dataset_data:
+            return cls._from_dataset_config(config_data, dataset_data)
 
         main_prompt = config_data["MAIN_PROMPT"]
         diff_prompts = config_data.get("DIFF_PROMPTS", [])
@@ -85,6 +103,34 @@ class AnalysisConfig:
             task=task,
             memorized_completion=memorized_completion,
             prompt_ids=prompt_ids,
+        )
+
+    @classmethod
+    def _from_dataset_config(cls, config_data: dict, dataset_data: dict) -> "AnalysisConfig":
+        """
+        Create an AnalysisConfig from a dataset configuration.
+
+        Args:
+            config_data: Full config data dict.
+            dataset_data: Dataset configuration dict with 'name', 'num_samples', etc.
+
+        Returns:
+            AnalysisConfig instance configured for dataset-based L0 analysis.
+        """
+        dataset = DatasetConfig(
+            name=dataset_data["name"],
+            num_samples=dataset_data["num_samples"],
+            text_column=dataset_data.get("text_column", "text"),
+            split=dataset_data.get("split", "train"),
+            subset=dataset_data.get("subset"),
+            seed=dataset_data.get("seed", 42),
+        )
+
+        return cls(
+            main_prompt="",
+            prompt_ids={},
+            task=config_data.get("TASK", Task.L0_REPLACEMENT_MODEL),
+            dataset=dataset,
         )
 
     @staticmethod

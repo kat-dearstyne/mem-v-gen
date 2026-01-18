@@ -36,14 +36,14 @@ class CrossConfigReplacementModelAccuracyStep(CrossConfigAnalyzeStep):
         ReplacementAccuracyMetrics.REPLACEMENT_PROB_OF_ORIGINAL_TOP.value
     ]
 
-    def __init__(self, save_path: Path | None = None):
+    def __init__(self, save_path: Path | None = None, **kwargs):
         """
         Initializes the cross-config replacement model accuracy step.
 
         Args:
             save_path: Base path for saving results.
         """
-        super().__init__(save_path=save_path)
+        super().__init__(save_path=save_path, **kwargs)
 
     def run(self, config_results: dict[str, dict[SupportedConfigAnalyzeStep, Any]]) -> dict | None:
         """
