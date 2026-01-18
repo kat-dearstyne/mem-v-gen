@@ -37,7 +37,7 @@ MIN_ACTIVATION_DENSITY=None
 TOP_K = 4
 FEATURE_LAYER = "25"
 FEATURE_ID = "9031"
-DEFAULT_BATCH_SIZE = 8
+DEFAULT_BATCH_SIZE = 2
 
 """
 ========= Environment ===========
