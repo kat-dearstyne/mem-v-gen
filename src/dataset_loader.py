@@ -35,7 +35,7 @@ class DatasetPromptsLoader:
 
     def load(self, num_samples: int) -> Dict[str, str]:
         """
-        Load a random sample of prompts from the dataset.
+        Load a random sample of prompts from the dataset using streaming.
 
         Args:
             num_samples: Number of samples to randomly select.
@@ -43,27 +43,23 @@ class DatasetPromptsLoader:
         Returns:
             Dictionary mapping prompt_id to prompt string.
         """
-        if self._dataset is None:
-            self._dataset = load_dataset(
-                self.dataset_name,
-                self.subset,
-                split=self.split
-            )
+        # Use streaming to avoid downloading the entire dataset
+        dataset = load_dataset(
+            self.dataset_name,
+            self.subset,
+            split=self.split,
+            streaming=True
+        )
 
-        sampled = self._dataset.shuffle(seed=self.seed).select(range(num_samples))
+        # Shuffle with buffer and take only what we need
+        shuffled = dataset.shuffle(seed=self.seed, buffer_size=10000)
 
         prompts = {}
         dataset_short_name = self.dataset_name.split('/')[-1]
-        for i, sample in enumerate(sampled):
+        for i, sample in enumerate(shuffled):
+            if i >= num_samples:
+                break
             prompt_id = f"{dataset_short_name}_{i}"
             prompts[prompt_id] = sample[self.text_column]
-
-        # Clear dataset from memory
-        del self._dataset
-        del sampled
-        self._dataset = None
-
-        import gc
-        gc.collect()
 
         return prompts

@@ -4,7 +4,11 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 from scipy import stats
-from wordfreq import zipf_frequency
+try:
+    from wordfreq import zipf_frequency
+except ImportError:
+    def zipf_frequency(word, lang):
+        return 0.0
 
 from src.constants import TOP_K
 from src.analysis.config_analysis.supported_config_analyze_step import SupportedConfigAnalyzeStep
