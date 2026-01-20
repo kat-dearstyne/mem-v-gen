@@ -66,12 +66,12 @@ def run_l0_for_config(
     all_l0 = []
     for i, prompt_text in enumerate(prompt_texts):
         hidden_states = manager.get_hidden_states(prompt_text)
-        features = manager.encode_features(hidden_states)
-        l0 = ConfigL0ReplacementModelStep.compute_l0_per_layer(features)
+        # encode_features now computes L0 directly to save memory
+        l0 = manager.encode_features(hidden_states)
         all_l0.append(l0.cpu())
 
         # Clean up GPU memory after each prompt
-        del hidden_states, features
+        del hidden_states
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 

@@ -129,14 +129,14 @@ class GemmaScope2CLTModelManager:
                 print(f"Warning: Could not load CLT config: {e}")
                 self._clt_config = {}
 
-            # Load weights - CLT weights are split per layer
+            # Load weights - CLT weights are split per layer (keep on CPU to save GPU memory)
             self._clt_weights = {"layers": {}}
             for layer_idx in range(self.n_layers):
                 weights_file = hf_hub_download(
                     repo_id=repo_id,
                     filename=f"{clt_path}/params_layer_{layer_idx}.safetensors",
                 )
-                layer_weights = load_file(weights_file, device=self.device)
+                layer_weights = load_file(weights_file, device="cpu")
                 self._clt_weights["layers"][layer_idx] = layer_weights
 
                 if layer_idx == 0:
@@ -265,15 +265,21 @@ class GemmaScope2CLTModelManager:
             # CLT W_enc might be (d_in, n_features) instead of (n_features, d_in)
             # Check and transpose if needed
             d_in = config.get("d_in", hs.shape[-1])
+
+            # Move W_enc to GPU only when needed, compute, then free
+            W_enc_gpu = W_enc.to(self.device)
+            hs_gpu = hs.to(W_enc_gpu.dtype).to(self.device)
+
             if W_enc.shape[0] == d_in:
-                # W_enc is (d_in, n_features), use different einsum
-                pre_acts = torch.einsum("bsd,df->bsf", hs.to(W_enc.dtype), W_enc)
+                pre_acts = torch.einsum("bsd,df->bsf", hs_gpu, W_enc_gpu)
             else:
-                # W_enc is (n_features, d_in)
-                pre_acts = torch.einsum("bsd,fd->bsf", hs.to(W_enc.dtype), W_enc)
+                pre_acts = torch.einsum("bsd,fd->bsf", hs_gpu, W_enc_gpu)
+
+            del W_enc_gpu, hs_gpu
+            torch.cuda.empty_cache()
 
             if b_enc is not None:
-                pre_acts = pre_acts + b_enc
+                pre_acts = pre_acts + b_enc.to(self.device)
 
             # Apply activation (JumpReLU or ReLU)
             if threshold > 0:
@@ -285,16 +291,22 @@ class GemmaScope2CLTModelManager:
             else:
                 features = torch.relu(pre_acts)
 
+            del pre_acts
+            torch.cuda.empty_cache()
+
             if is_single:
                 features = features.squeeze(0)
 
-            features_list.append(features)
+            # Compute L0 for this layer immediately and only keep that
+            # This avoids storing the huge feature tensor
+            l0_this_layer = (features > 0).float().sum(dim=-1)[:, 1:].mean(dim=-1) if features.dim() == 3 else (features > 0).float().sum(dim=-1)[1:].mean()
+            features_list.append(l0_this_layer.cpu())
 
-        # Stack: (n_layers, seq_len, n_features) or (batch, n_layers, seq_len, n_features)
-        if features_list[0].dim() == 2:
-            return torch.stack(features_list, dim=0)
-        else:
-            return torch.stack(features_list, dim=1)
+            del features
+            torch.cuda.empty_cache()
+
+        # Return L0 per layer: (n_layers,)
+        return torch.stack(features_list, dim=0)
     
     def compute_l0_for_prompt(self, prompt: str) -> Tensor:
         """
