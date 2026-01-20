@@ -1,14 +1,14 @@
 numpy
 pandas
-torch>=2.0.0
-transformer_lens>=1.0.0
+torc
+transformer_lens
 scipy
 matplotlib
 seaborn>=0.13.0
 requests
 tqdm
 python-dotenv
-huggingface_hub>=0.20.0
+huggingface_hub==0.20.0
 circuit-tracer @ git+https://github.com/safety-research/circuit-tracer.git
 wordfreq>=3.0.0
 narwhals
