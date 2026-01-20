@@ -113,10 +113,10 @@ class GemmaScope2CLTModelManager:
             repo_id = self.CLT_REPOS.get(self.model_variant)
             if not repo_id:
                 raise ValueError(f"No CLT repo for variant: {self.model_variant}")
-            
+
             clt_path = f"clt/{self.clt_config}"
             print(f"Loading CLT from {repo_id}/{clt_path}")
-            
+
             # Try to load config
             try:
                 config_file = hf_hub_download(
@@ -128,19 +128,25 @@ class GemmaScope2CLTModelManager:
             except Exception as e:
                 print(f"Warning: Could not load CLT config: {e}")
                 self._clt_config = {}
-            
-            # Load weights
-            weights_file = hf_hub_download(
-                repo_id=repo_id,
-                filename=f"{clt_path}/params.safetensors",
-            )
-            self._clt_weights = load_file(weights_file, device=self.device)
-            
+
+            # Load weights - CLT weights are split per layer
+            self._clt_weights = {"layers": {}}
+            for layer_idx in range(self.n_layers):
+                weights_file = hf_hub_download(
+                    repo_id=repo_id,
+                    filename=f"{clt_path}/params_layer_{layer_idx}.safetensors",
+                )
+                layer_weights = load_file(weights_file, device=self.device)
+                self._clt_weights["layers"][layer_idx] = layer_weights
+
+                if layer_idx == 0:
+                    print(f"Layer 0 weight keys: {list(layer_weights.keys())}")
+                    for k, v in layer_weights.items():
+                        print(f"  {k}: {v.shape}, dtype={v.dtype}")
+
             print(f"CLT loaded. Config: {self._clt_config}")
-            print(f"Weight keys: {list(self._clt_weights.keys())}")
-            for k, v in self._clt_weights.items():
-                print(f"  {k}: {v.shape}, dtype={v.dtype}")
-        
+            print(f"Loaded {len(self._clt_weights['layers'])} layers")
+
         return self._clt_weights, self._clt_config
     
     def get_hidden_states(self, prompt: str) -> List[Tensor]:
@@ -208,70 +214,51 @@ class GemmaScope2CLTModelManager:
     ) -> Tensor:
         """
         Encode hidden states through the CLT to get feature activations.
-        
+
         Args:
             hidden_states: List of hidden state tensors from the model
-            
+
         Returns:
             Feature activations tensor
         """
         weights, config = self.load_clt()
-        
-        # Get encoder weights - naming may vary
-        W_enc = None
-        b_enc = None
+        layer_weights = weights["layers"]
         threshold = config.get("threshold", 0.0)
-        
-        # Try common weight names
-        for enc_key in ["W_enc", "encoder.weight", "w_enc", "W_e"]:
-            if enc_key in weights:
-                W_enc = weights[enc_key]
-                break
-        
-        for bias_key in ["b_enc", "encoder.bias", "b_e"]:
-            if bias_key in weights:
-                b_enc = weights[bias_key]
-                break
-        
-        if W_enc is None:
-            raise KeyError(f"Could not find encoder weights. Available: {list(weights.keys())}")
-        
-        print(f"Encoder shape: {W_enc.shape}")
-        print(f"Threshold: {threshold}")
-        
-        # Determine CLT structure from weight shapes
-        # CLT might have: (n_features, d_model) for shared encoder
-        # or (n_layers, n_features, d_model) for per-layer encoders
-        
+
         features_list = []
-        
+
         # Skip embedding layer (index 0), use layers 1 to n_layers
         for layer_idx, hs in enumerate(hidden_states[1:]):  # Skip embedding
+            if layer_idx not in layer_weights:
+                continue
+
+            lw = layer_weights[layer_idx]
+
+            # Get encoder weights for this layer
+            W_enc = None
+            b_enc = None
+            for enc_key in ["W_enc", "encoder.weight", "w_enc", "W_e"]:
+                if enc_key in lw:
+                    W_enc = lw[enc_key]
+                    break
+            for bias_key in ["b_enc", "encoder.bias", "b_e"]:
+                if bias_key in lw:
+                    b_enc = lw[bias_key]
+                    break
+
+            if W_enc is None:
+                raise KeyError(f"Could not find encoder weights for layer {layer_idx}. Available: {list(lw.keys())}")
+
             # hs shape: (batch, seq_len, d_model) or (seq_len, d_model)
             is_single = hs.dim() == 2
             if is_single:
                 hs = hs.unsqueeze(0)
-            
-            # Encode based on weight shape
-            if W_enc.dim() == 2:
-                # Shared encoder: (n_features, d_model)
-                pre_acts = torch.einsum("bsd,fd->bsf", hs.to(W_enc.dtype), W_enc)
-                if b_enc is not None:
-                    pre_acts = pre_acts + b_enc
-            elif W_enc.dim() == 3:
-                # Per-layer encoder: (n_layers, n_features, d_model)
-                if layer_idx < W_enc.shape[0]:
-                    pre_acts = torch.einsum("bsd,fd->bsf", hs.to(W_enc.dtype), W_enc[layer_idx])
-                    if b_enc is not None:
-                        pre_acts = pre_acts + b_enc[layer_idx]
-                else:
-                    # Out of range - use last layer's encoder
-                    pre_acts = torch.einsum("bsd,fd->bsf", hs.to(W_enc.dtype), W_enc[-1])
-                    if b_enc is not None:
-                        pre_acts = pre_acts + b_enc[-1]
-            else:
-                raise ValueError(f"Unexpected encoder weight shape: {W_enc.shape}")
-            
+
+            # Encode: W_enc shape is (n_features, d_model)
+            pre_acts = torch.einsum("bsd,fd->bsf", hs.to(W_enc.dtype), W_enc)
+            if b_enc is not None:
+                pre_acts = pre_acts + b_enc
+
             # Apply activation (JumpReLU or ReLU)
             if threshold > 0:
                 features = torch.where(
@@ -281,12 +268,12 @@ class GemmaScope2CLTModelManager:
                 )
             else:
                 features = torch.relu(pre_acts)
-            
+
             if is_single:
                 features = features.squeeze(0)
-            
+
             features_list.append(features)
-        
+
         # Stack: (n_layers, seq_len, n_features) or (batch, n_layers, seq_len, n_features)
         if features_list[0].dim() == 2:
             return torch.stack(features_list, dim=0)
@@ -367,16 +354,15 @@ class GemmaScope2CLTModelManager:
     def get_d_transcoder(self) -> int:
         """Get the number of features in the CLT."""
         weights, _ = self.load_clt()
-        
+        layer_weights = weights["layers"]
+
+        # Get first layer's weights
+        first_layer = layer_weights[0]
         for enc_key in ["W_enc", "encoder.weight", "w_enc", "W_e"]:
-            if enc_key in weights:
-                # Features dimension is typically the first non-layer dimension
-                W = weights[enc_key]
-                if W.dim() == 2:
-                    return W.shape[0]
-                elif W.dim() == 3:
-                    return W.shape[1]
-        
+            if enc_key in first_layer:
+                W = first_layer[enc_key]
+                return W.shape[0]  # (n_features, d_model)
+
         raise KeyError("Could not determine d_transcoder from weights")
 
 
