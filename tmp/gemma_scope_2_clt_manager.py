@@ -225,6 +225,11 @@ class GemmaScope2CLTModelManager:
         layer_weights = weights["layers"]
         threshold = config.get("threshold", 0.0)
 
+        # Debug: print shapes
+        print(f"Number of hidden states: {len(hidden_states)}")
+        print(f"Hidden state 0 shape: {hidden_states[0].shape}")
+        print(f"Config d_in: {config.get('d_in')}, d_sae: {config.get('d_sae')}")
+
         features_list = []
 
         # Skip embedding layer (index 0), use layers 1 to n_layers
@@ -254,8 +259,19 @@ class GemmaScope2CLTModelManager:
             if is_single:
                 hs = hs.unsqueeze(0)
 
-            # Encode: W_enc shape is (n_features, d_model)
-            pre_acts = torch.einsum("bsd,fd->bsf", hs.to(W_enc.dtype), W_enc)
+            if layer_idx == 0:
+                print(f"Layer 0 - hs shape: {hs.shape}, W_enc shape: {W_enc.shape}")
+
+            # CLT W_enc might be (d_in, n_features) instead of (n_features, d_in)
+            # Check and transpose if needed
+            d_in = config.get("d_in", hs.shape[-1])
+            if W_enc.shape[0] == d_in:
+                # W_enc is (d_in, n_features), use different einsum
+                pre_acts = torch.einsum("bsd,df->bsf", hs.to(W_enc.dtype), W_enc)
+            else:
+                # W_enc is (n_features, d_in)
+                pre_acts = torch.einsum("bsd,fd->bsf", hs.to(W_enc.dtype), W_enc)
+
             if b_enc is not None:
                 pre_acts = pre_acts + b_enc
 
