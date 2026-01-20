@@ -9,7 +9,7 @@ from src.utils import get_env_list
 if __name__ == "__main__":
     results = run_l0_for_all_configs(
         config_dir="l0",
-        model_variant="1b-it",
+        model_variant="270m-it",
         clt_config="width_262k_l0_medium",
         config_names=get_env_list("CONFIG_NAME")
     )
