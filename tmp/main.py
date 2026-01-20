@@ -1,6 +1,7 @@
 """
 Main entry point for running L0 analysis with Gemma Scope 2 CLTs.
 """
+import os
 
 from run_l0 import run_l0_for_all_configs
 
@@ -10,4 +11,5 @@ if __name__ == "__main__":
         config_dir="l0",
         model_variant="1b-it",
         clt_config="width_262k_l0_medium",
+        config_names=os.environ.get("CONFIG_NAME")
     )
