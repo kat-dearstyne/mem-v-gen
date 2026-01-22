@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Dict, Union
 
+from src.dataset_loader import DatasetPromptsLoader
 from src.utils import load_json, get_env_list
 
 
@@ -26,6 +27,7 @@ class DatasetConfig:
     split: str = "train"
     subset: Optional[str] = None
     seed: int = 42
+    max_length: Optional[int] = None
 
 
 @dataclass
@@ -55,23 +57,31 @@ class AnalysisConfig:
         """
         config_data = load_json(config_path)
 
-        # Check for dataset config
-        dataset_data = config_data.get("DATASET")
-        if dataset_data:
-            return cls._from_dataset_config(config_data, dataset_data)
-
-        main_prompt = config_data["MAIN_PROMPT"]
+        dataset = None
+        main_prompt = config_data.get("MAIN_PROMPT")
         diff_prompts = config_data.get("DIFF_PROMPTS", [])
         sim_prompts = config_data.get("SIM_PROMPTS", [])
+        prompt_ids = {}
+        if dataset_data := config_data.get("DATASET"):
+            dataset = DatasetConfig(
+                name=dataset_data["name"],
+                num_samples=dataset_data["num_samples"],
+                text_column=dataset_data.get("text_column", "text"),
+                split=dataset_data.get("split", "train"),
+                subset=dataset_data.get("subset"),
+                seed=dataset_data.get("seed", 42),
+                max_length=dataset_data.get("max_length"),
+            )
+        else:
+            assert main_prompt is not None, "Must provide a main prompt or dataset"
+            all_prompts = [main_prompt] + diff_prompts + sim_prompts
+            prompt_ids = cls._parse_prompt_ids(
+                config_data.get("PROMPT_IDS") or prompt_ids_override,
+                all_prompts
+            )
+
         token_of_interest = config_data.get("TOKEN_OF_INTEREST")
         memorized_completion = config_data.get("MEMORIZED_COMPLETION")
-
-        # Parse prompt IDs: override > config > environment
-        all_prompts = [main_prompt] + diff_prompts + sim_prompts
-        prompt_ids = cls._parse_prompt_ids(
-            config_data.get("PROMPT_IDS") or prompt_ids_override,
-            all_prompts
-        )
 
         # Get task from config and environment, config takes priority
         config_task = config_data.get("TASK")
@@ -83,9 +93,10 @@ class AnalysisConfig:
 
         task = config_task or env_task
 
-        # Infer task from other fields if not specified
         if not task:
-            if diff_prompts or sim_prompts:
+            if dataset:
+                task = Task.L0_REPLACEMENT_MODEL
+            elif diff_prompts or sim_prompts:
                 if token_of_interest:
                     raise ValueError(
                         "Both TOKEN_OF_INTEREST and DIFF_PROMPTS/SIM_PROMPTS supplied. "
@@ -103,33 +114,6 @@ class AnalysisConfig:
             task=task,
             memorized_completion=memorized_completion,
             prompt_ids=prompt_ids,
-        )
-
-    @classmethod
-    def _from_dataset_config(cls, config_data: dict, dataset_data: dict) -> "AnalysisConfig":
-        """
-        Create an AnalysisConfig from a dataset configuration.
-
-        Args:
-            config_data: Full config data dict.
-            dataset_data: Dataset configuration dict with 'name', 'num_samples', etc.
-
-        Returns:
-            AnalysisConfig instance configured for dataset-based L0 analysis.
-        """
-        dataset = DatasetConfig(
-            name=dataset_data["name"],
-            num_samples=dataset_data["num_samples"],
-            text_column=dataset_data.get("text_column", "text"),
-            split=dataset_data.get("split", "train"),
-            subset=dataset_data.get("subset"),
-            seed=dataset_data.get("seed", 42),
-        )
-
-        return cls(
-            main_prompt="",
-            prompt_ids={},
-            task=config_data.get("TASK", Task.L0_REPLACEMENT_MODEL),
             dataset=dataset,
         )
 
@@ -148,7 +132,6 @@ class AnalysisConfig:
         Returns:
             Dictionary mapping prompt string to its ID.
         """
-        # Try config first, then environment variable
         if prompt_ids is None:
             prompt_ids = get_env_list("PROMPT_IDS")
             if not prompt_ids:
@@ -156,7 +139,6 @@ class AnalysisConfig:
                     "PROMPT_IDS must be specified in config file or PROMPT_IDS environment variable"
                 )
 
-        # Convert dict format to list format
         if isinstance(prompt_ids, dict):
             prompt_ids = (
                     prompt_ids.get("main", []) +
@@ -164,7 +146,6 @@ class AnalysisConfig:
                     prompt_ids.get("sim", [])
             )
 
-        # Validate and build mapping from list format
         if len(prompt_ids) != len(all_prompts):
             raise ValueError(
                 f"PROMPT_IDS length ({len(prompt_ids)}) must match "
@@ -205,3 +186,20 @@ class AnalysisConfig:
     def sim_prompt_ids(self) -> List[str]:
         """Get the IDs for sim prompts."""
         return [self.prompt_ids[p] for p in self.sim_prompts]
+
+    def load_prompts_from_dataset(self) -> Dict[str, str]:
+        """
+        Load prompts from a HuggingFace dataset.
+
+        Returns:
+            Dictionary mapping prompt_id to prompt string.
+        """
+        loader = DatasetPromptsLoader(
+            dataset_name=self.dataset.name,
+            text_column=self.dataset.text_column,
+            split=self.dataset.split,
+            subset=self.dataset.subset,
+            seed=self.dataset.seed,
+            max_length=self.dataset.max_length
+        )
+        return loader.load(self.dataset.num_samples)

@@ -16,7 +16,6 @@ from src.analysis.cross_config_analysis.cross_config_subgraph_filter_step import
     CrossConfigSubgraphFilterStep, SHARED_FEATURES_KEY
 )
 from src.constants import DATA_PATH, MODEL, SUBMODELS, TOP_K, CONFIG_BASE_DIR, OUTPUT_DIR, DEFAULT_BATCH_SIZE
-from src.dataset_loader import DatasetPromptsLoader
 from src.metrics import FeatureSharingMetrics
 from src.neuronpedia_manager import GraphConfig, NeuronpediaManager
 
@@ -24,26 +23,6 @@ from src.neuronpedia_manager import GraphConfig, NeuronpediaManager
 OVERLAP_ANALYSIS_FILENAME = CrossConfigSubgraphFilterStep.OVERLAP_ANALYSIS_FILENAME
 FEATURE_OVERLAP_METRICS_FILENAME = CrossConfigFeatureOverlapStep.FEATURE_OVERLAP_METRICS_FILENAME
 SHARED_FEATURE_METRICS_FILENAME = CrossConfigSubgraphFilterStep.SHARED_FEATURE_METRICS_FILENAME
-
-
-def _load_prompts_from_dataset(dataset_config: DatasetConfig) -> Dict[str, str]:
-    """
-    Load prompts from a HuggingFace dataset.
-
-    Args:
-        dataset_config: DatasetConfig instance with dataset parameters.
-
-    Returns:
-        Dictionary mapping prompt_id to prompt string.
-    """
-    loader = DatasetPromptsLoader(
-        dataset_name=dataset_config.name,
-        text_column=dataset_config.text_column,
-        split=dataset_config.split,
-        subset=dataset_config.subset,
-        seed=dataset_config.seed
-    )
-    return loader.load(dataset_config.num_samples)
 
 
 def analyze_conditions(condition_results: Dict[str, Dict[SupportedConfigAnalyzeStep, Any]],
@@ -201,7 +180,7 @@ def run_for_config(config_dir: Path, config_name: str,
 
     # Load prompts from dataset if configured
     if config.dataset:
-        prompts = _load_prompts_from_dataset(config.dataset)
+        prompts = config.load_prompts_from_dataset()
     else:
         prompts = config.id_to_prompt
 

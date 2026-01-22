@@ -14,7 +14,8 @@ class DatasetPromptsLoader:
             text_column: str = "text",
             split: str = "train",
             subset: str = None,
-            seed: int = DEFAULT_SEED
+            seed: int = DEFAULT_SEED,
+            max_length: int = None
     ):
         """
         Initialize the dataset loader.
@@ -25,12 +26,14 @@ class DatasetPromptsLoader:
             split: Dataset split to use.
             subset: Dataset subset/config name if required (e.g., 'en' for c4).
             seed: Random seed for reproducible sampling.
+            max_length: Maximum character length to truncate samples to.
         """
         self.dataset_name = dataset_name
         self.text_column = text_column
         self.split = split
         self.subset = subset
         self.seed = seed
+        self.max_length = max_length
         self._dataset = None
 
     def load(self, num_samples: int) -> Dict[str, str]:
@@ -60,6 +63,9 @@ class DatasetPromptsLoader:
             if i >= num_samples:
                 break
             prompt_id = f"{dataset_short_name}_{i}"
-            prompts[prompt_id] = sample[self.text_column]
+            text = sample[self.text_column]
+            if self.max_length is not None:
+                text = text[:self.max_length]
+            prompts[prompt_id] = text
 
         return prompts
