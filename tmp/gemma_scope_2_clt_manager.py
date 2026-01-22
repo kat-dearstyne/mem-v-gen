@@ -152,60 +152,103 @@ class GemmaScope2CLTModelManager:
     def get_hidden_states(self, prompt: str) -> List[Tensor]:
         """
         Get hidden states from the base model for a given prompt.
-        
+
+        Captures activations at pre_feedforward_layernorm.output (before MLP)
+        which is what the CLT expects as input.
+
         Args:
             prompt: Input text
-            
+
         Returns:
-            List of hidden states, one per layer
+            List of hidden states, one per layer (pre-FFN activations)
         """
         model, tokenizer = self.load_base_model()
-        
+
         inputs = tokenizer(prompt, return_tensors="pt").to(self.device)
-        
-        with torch.no_grad():
-            outputs = model(**inputs, output_hidden_states=True)
-        
-        # hidden_states is a tuple of (n_layers + 1) tensors
-        # First one is embedding, rest are layer outputs
-        return list(outputs.hidden_states)
+
+        # Use hooks to capture pre-FFN activations (what CLT expects)
+        pre_ffn_activations = []
+        hooks = []
+
+        def make_hook(layer_idx):
+            def hook(module, input, output):
+                pre_ffn_activations.append((layer_idx, output.detach()))
+            return hook
+
+        # Register hooks on pre_feedforward_layernorm for each layer
+        for layer_idx, layer in enumerate(model.model.layers):
+            hook = layer.pre_feedforward_layernorm.register_forward_hook(make_hook(layer_idx))
+            hooks.append(hook)
+
+        try:
+            with torch.no_grad():
+                model(**inputs)
+        finally:
+            # Remove hooks
+            for hook in hooks:
+                hook.remove()
+
+        # Sort by layer index and extract activations
+        pre_ffn_activations.sort(key=lambda x: x[0])
+        return [act for _, act in pre_ffn_activations]
     
     def get_hidden_states_batch(
-        self, 
+        self,
         prompts: List[str],
         batch_size: Optional[int] = None,
     ) -> Tensor:
         """
         Get hidden states for multiple prompts.
-        
+
+        Captures activations at pre_feedforward_layernorm.output (before MLP)
+        which is what the CLT expects as input.
+
         Args:
             prompts: List of input texts
             batch_size: Batch size for processing
-            
+
         Returns:
-            Tensor of shape (num_prompts, n_layers+1, seq_len, d_model)
+            Tensor of shape (num_prompts, n_layers, seq_len, d_model)
         """
         model, tokenizer = self.load_base_model()
-        
+
         batch_size = batch_size or len(prompts)
         all_hidden_states = []
-        
+
         for i in range(0, len(prompts), batch_size):
             batch_prompts = prompts[i:i + batch_size]
             inputs = tokenizer(
-                batch_prompts, 
-                return_tensors="pt", 
+                batch_prompts,
+                return_tensors="pt",
                 padding=True,
                 truncation=True,
             ).to(self.device)
-            
-            with torch.no_grad():
-                outputs = model(**inputs, output_hidden_states=True)
-            
-            # Stack hidden states: (batch, n_layers+1, seq_len, d_model)
-            batch_hs = torch.stack(outputs.hidden_states, dim=1)
+
+            # Use hooks to capture pre-FFN activations
+            pre_ffn_activations = []
+            hooks = []
+
+            def make_hook(layer_idx):
+                def hook(module, input, output):
+                    pre_ffn_activations.append((layer_idx, output.detach()))
+                return hook
+
+            for layer_idx, layer in enumerate(model.model.layers):
+                hook = layer.pre_feedforward_layernorm.register_forward_hook(make_hook(layer_idx))
+                hooks.append(hook)
+
+            try:
+                with torch.no_grad():
+                    model(**inputs)
+            finally:
+                for hook in hooks:
+                    hook.remove()
+
+            # Sort by layer index and stack: (batch, n_layers, seq_len, d_model)
+            pre_ffn_activations.sort(key=lambda x: x[0])
+            batch_hs = torch.stack([act for _, act in pre_ffn_activations], dim=1)
             all_hidden_states.append(batch_hs)
-        
+
         return torch.cat(all_hidden_states, dim=0)
     
     def encode_features(
@@ -232,8 +275,8 @@ class GemmaScope2CLTModelManager:
 
         features_list = []
 
-        # Use hidden_states[0] to hidden_states[n_layers-1] for CLT layers 0 to n_layers-1
-        for layer_idx, hs in enumerate(hidden_states[:-1]):  # All except final output
+        # hidden_states now contains pre-FFN activations for each layer (from hooks)
+        for layer_idx, hs in enumerate(hidden_states):  # One pre-FFN activation per layer
             if layer_idx not in layer_weights:
                 continue
 

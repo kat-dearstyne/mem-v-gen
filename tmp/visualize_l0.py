@@ -216,7 +216,7 @@ if __name__ == "__main__":
     import sys
 
     # Default path
-    data_dir = Path(f"{OUTPUT_DIR}/l0_gemmascope2")
+    data_dir = Path(f"{OUTPUT_DIR}/l0_gemmascope2/new")
 
     # Allow command line override
     if len(sys.argv) > 1:
