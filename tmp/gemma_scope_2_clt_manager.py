@@ -232,8 +232,8 @@ class GemmaScope2CLTModelManager:
 
         features_list = []
 
-        # Skip embedding layer (index 0), use layers 1 to n_layers
-        for layer_idx, hs in enumerate(hidden_states[1:]):  # Skip embedding
+        # Use hidden_states[0] to hidden_states[n_layers-1] for CLT layers 0 to n_layers-1
+        for layer_idx, hs in enumerate(hidden_states[:-1]):  # All except final output
             if layer_idx not in layer_weights:
                 continue
 
